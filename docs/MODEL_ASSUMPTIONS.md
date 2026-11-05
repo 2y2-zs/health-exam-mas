@@ -1,4 +1,4 @@
-# Model Assumptions & Evidence Register v1.0
+# Model Assumptions & Evidence Register v1.1
 
 **Project:** PSP305 — Agent-Based Simulation and Comparative Evaluation of Routing Policies for Daily Health Examination Centres  
 **Status:** Working design document; NOT a validated operational model  
@@ -119,7 +119,37 @@ Citations below identify supporting literature for **the particular concepts not
 - **Chiu & Yeh (2010)**, *Fuzzy-Based Dynamic Scheduling System for Health Examination*. https://doi.org/10.1109/ICMLC.2010.5580551
 - **Jain et al. (2022)**, *Improving Patient Satisfaction and Outpatient Diagnostic Center Efficiency Using Novel Online Real-Time Scheduling*. https://doi.org/10.1016/j.orhc.2022.100338
 
-## 9. Update procedure
+## 9. Model 0 v1.1 decisions and evidence status (2026-11-05)
+
+This section supersedes any earlier v1.0 phrasing on Model 0 policy, precedence and test semantics. For full rules see [MODEL_SPEC.md](MODEL_SPEC.md); for test inputs/expected traces see [VERIFICATION_PLAN.md](VERIFICATION_PLAN.md).
+
+| ID | Updated statement | Evidence class | Status / caveat |
+|---|---|---|---|
+| V11-01 | Fixed Route is a **replaceable routing policy** and not a clinical precedence graph. P1 A→B, P2 B→C, P3 A→B→C are default synthetic policy routes. | SYNTHETIC + DESIGN | **Design agreed**; implement/test separately from eligibility |
+| V11-02 | Hard precedence for P3 is only **A-before-C**. Initially eligible {A,B}; after A eligible {B,C}; A→C→B is legal. | SYNTHETIC | **Design agreed**; T04 includes both negative and positive checks |
+| V11-03 | Three simultaneous requests to capacity-2 C require C-only **test fixture** (T03), not three ordinary P2 arrivals upstream of B. | SYNTHETIC | **Design agreed**; avoids invalid test setup |
+| V11-04 | Stable patient rank, shared FCFS queue excluding patients in service, homogeneous servers, unlimited waiting space, non-preemptive service. | DESIGN engineering simplification | Needs actual implementation verification |
+| V11-05 | Service intervals are half-open [start,end), zero-time routing/decisions, no resource reservations while travelling. | DESIGN engineering simplification | Needs actual implementation verification |
+| V11-06 | Completion → release/commit → admission → travel/routing intents → queue entries → dispatch proposed for same-time event processing. | DESIGN event semantics | **Proposed domain contract; exact SimPy mechanism still TO-CONFIRM** |
+| V11-07 | Native SimPy queue scheduling cannot simply be assumed to enforce all domain phases; full global six-phase coordinator is **optional**, not a compulsory development milestone. | DESIGN implementation choice | Review native process-based and minimal coordination approaches; verify T06 event trace, not just finish times |
+| V11-08 | Admission attempts exactly at time H accepted; later attempts rejected, previously admitted patients continue to completion. | DESIGN synthetic cutoff convention | Test T09; do not use `env.run(until=H)` to truncate the day |
+| V11-09 | One Station Agent owns each visit's queue/token/release; deny duplicate queue entry, completion and release. | DESIGN engineering invariant | Implement and independently test before claiming correctness |
+| V11-10 | T01–T10 have independently checkable **candidate handwritten expected traces**; no tests executed or passed. | SYNTHETIC verification oracle | Student must recalculate and record actual traces |
+| V11-11 | SimPy dependency version and resource/dispatch approach remain unpinned. | TO-CONFIRM | Select version and commit approach before implementation |
+
+**Source audit clarification:** `L-DATA` does not itself mean source-checked. Use a separate proposed `source-checked` status only after actually examining the original full text/table. `verified-in-code` and `validated-empirically` are different claims; neither is currently earned.
+
+- **Munavalli et al. 2020:** multi-agent healthcare coordination is supported; our exact three-agent decomposition and active autonomous examinees are project choices, not direct observations from that work.
+- **Ying & Kittipittayakorn 2018:** examination-centre DES + agent-based modelling has precedent; that does not establish that the paper used our Python/SimPy architecture.
+- **Li et al. 2025:** examinee deviations/queue-switching requests motivate investigation, but exact physical/virtual queue-entry and queue-exit timing is **needs-primary-check**. Our **pre-queue override** and B1/B2 rules are distinct unvalidated candidates.
+- **Ho et al. 2021:** multiple examination sets support modelling heterogeneous required tests, but not the specific synthetic P1–P3 definitions.
+- **Lv et al. 2026:** original centralized-batch numeric case is not evidence for daily Poisson arrivals, Gamma service durations, candidate demand rates or assumed patient demographics. Recheck original tables before numerical use.
+
+### Implementation gate
+
+Model 0 v1.1 is **design specified but not implemented, not verified and not empirically validated**. Finalizing an event-handling approach, keeping state and resource ownership coherent, validating negative-case semantics, pinning SimPy version and deriving expected trace oracles independently are prerequisites to claiming Gate 1 completion.
+
+## 10. Update procedure
 
 For each changed setting, record: **ID -> prior value -> new value -> supporting evidence or experiment purpose -> impact on agents/routes/tests -> verification or validation status**. Keep this document aligned with `MODEL_SPEC.md` and `VERIFICATION_PLAN.md`.
 
