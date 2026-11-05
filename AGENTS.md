@@ -1,6 +1,6 @@
 # Codex collaboration guidance
 
-Read `docs/RESEARCH_CONTEXT.md`, `docs/MODEL_SPEC.md`, and `docs/VERIFICATION_PLAN.md` before proposing changes.
+Read `docs/RESEARCH_CONTEXT.md`, `docs/MODEL_SPEC.md`, `docs/VERIFICATION_PLAN.md`, and `docs/MODEL_ASSUMPTIONS.md` before proposing changes.
 
 This is an assessed PSP305 final-year project. The student is responsible for independently writing the core simulation, routing algorithms, conducting experiments, and interpreting results. Codex should focus on explaining concepts, reviewing specifications, pointing out bugs, suggesting verification approaches, and commenting on student-written code. Do not generate the assessed core implementation or fabricate data, test passes, literature, or findings.
 
