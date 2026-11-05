@@ -16,6 +16,7 @@ The proposed architecture separates autonomous Patient, Examination Station/Reso
 
 - [Research background and literature](docs/RESEARCH_CONTEXT.md)
 - [Simulation and Agent specification](docs/MODEL_SPEC.md)
+- [Model assumptions and evidence register](docs/MODEL_ASSUMPTIONS.md)
 - [Model 0 verification plan](docs/VERIFICATION_PLAN.md)
 - [Codex collaboration guidance](AGENTS.md)
 
