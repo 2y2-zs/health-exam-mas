@@ -1,0 +1,6 @@
+# Planned development dependencies; versions should be fixed after local environment setup.
+simpy
+numpy
+pandas
+matplotlib
+pytest
