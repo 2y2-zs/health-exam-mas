@@ -1,22 +1,32 @@
-# Research context (working v1.0)
+# Research context (working v1.1)
+
+Updated: 2026-11-10. Research direction revised; no implementation, executed tests or experimental results are established by this update.
 
 ## Working title
 
-**Agent-Based Simulation and Comparative Evaluation of Routing Policies for Daily Health Examination Centres**
+**Multi-Agent Simulation and Comparative Evaluation of Queue Scheduling Policies for Daily Health Examination Centres**
 
-中文：面向日常体检中心的基于 Agent 的仿真建模与路径调度策略比较研究。
+中文：面向日常体检中心的多智能体仿真与排队调度策略比较研究。
 
 ## Research allocation and questions
 
-- **RQ1 (50%)**: Develop and verify/validate an agent-based simulation representing heterogeneous examinees, stations/resources, and dynamic interactions in a daily health examination centre.
-- **RQ2 (40%)**: Compare established routing/scheduling policies under a common simulation environment, and study sensitivity to patient compliance and autonomous choices.
+- **RQ1 (50%)**: Develop a realistically grounded and verifiable multi-agent simulation of a daily health examination centre using Python + SimPy. Patient Agent state, heterogeneous requirements/attributes, observable information, decisions/actions and interactions with stations/resources are central modelling concerns. Simple explicit behaviour is sufficient initially; complex autonomous behaviour is not compulsory. Verify the implementation and qualify external validation according to available evidence.
+- **RQ2 (40%)**: Compare existing **Queue Scheduling Policies** from an operational perspective under a common simulation environment: when a station can serve, **which waiting patient is served next**? This is separate from **Routing**, which selects the patient's next station. **FCFS is the only confirmed baseline**; other policies remain to be selected from verified sources.
 - **RQ3 (optional 10%)**: Only if RQ1/RQ2 yield reproducible limitations, investigate a focused policy improvement. A new algorithm is NOT mandatory.
 
-## Proposed research mechanism
+## Decision scope and proposed research mechanism
 
-Routing recommendation -> patient accepts or overrides a *legal* next station -> actual queue changes -> subsequent recommendations respond to the updated system.
+Patient state and examination requirements -> common legal flow/routing rule -> station queue entry -> queue scheduling selects a waiting patient when capacity is available -> service completion updates patient and resource states -> subsequent agent interactions and service decisions.
 
-This is an investigation, NOT a predetermined conclusion that policy rankings will change.
+Keep flow/routing, information access, resource configuration and patient assumptions common across initial queue-policy comparisons. Fixed route, shortest observed queue and shortest estimated wait were earlier routing candidates; they must not be renamed as queue scheduling algorithms. The design interface in MODEL_SPEC separates station service selection from next-station choice; its concrete SimPy queue/resource implementation remains to be selected and verified.
+
+After Model 0 verification, a verified Model 1 with common flow and B0 full routing compliance can support initial RQ2 comparisons. Model 2 is not a prerequisite for those comparisons. B1/B2 pre-queue routing override/choice remain hypotheses to assess before any optional behavioural extension; they are not confirmed patient behaviour or the required mechanism of RQ2.
+
+Candidate operational outcomes include waiting time, equipment/resource utilization, completed examinations/patients, clearance time and fairness. Exact metric definitions, policy candidates and experiments are not frozen. Policy performance, rankings and behavioural effects are research questions, not predetermined conclusions.
+
+## Packages and evidence
+
+Examination packages may be drawn from checked primary literature or authentic hospital-published package lists. Record the original source/URL, relevant table/page or access date, package items, their mapping to model stations, and any omissions, aggregation or assumptions. A package list alone does not establish arrival patterns, package proportions, patient demographics, clinical precedence or service durations. Synthetic Model 0 packages remain software-verification inputs.
 
 ## Literature to consult (verify details before citation)
 
@@ -31,6 +41,8 @@ This is an investigation, NOT a predetermined conclusion that policy rankings wi
 - Ho et al. (2021), Overbooking for Physical Examination Considering Late Cancellation and Set-Resource Relationship. https://doi.org/10.1186/s12913-021-07148-y
 
 **Literature caution:** ABM in physical examinations, online scheduling, and patient deviation behaviour already exist individually. The proposed integration/gap is a hypothesis to assess by critical comparison, not a claim of being first. Batch-examination parameters cannot simply be treated as observations of ongoing daily arrivals.
+
+The references remain a reading list, not a verified queue-policy catalogue. A paper's use of “scheduling” does not establish that it selects the next waiting patient for service. Check its decision object, information requirements and exact rule before using it as evidence for a queue scheduling policy; retain routing, batch scheduling and behavioural studies only for the claims they actually support.
 
 ## Schedule
 

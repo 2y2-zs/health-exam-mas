@@ -1,8 +1,9 @@
-# Model Assumptions & Evidence Register v1.1
+# Model Assumptions & Evidence Register v1.2
 
-**Project:** PSP305 — Agent-Based Simulation and Comparative Evaluation of Routing Policies for Daily Health Examination Centres  
+**Project:** PSP305 — Multi-Agent Simulation and Comparative Evaluation of Queue Scheduling Policies for Daily Health Examination Centres
+
 **Status:** Working design document; NOT a validated operational model  
-**Updated:** 2026-11-05
+**Updated:** 2026-11-10
 
 ## 1. Purpose and evidence labels
 
@@ -10,6 +11,7 @@ This register makes every consequential design choice traceable and distinguishe
 
 Evidence types:
 - **L-DATA — Literature-reported case data:** a published case's observed/reported numerical inputs; limited to the original setting. Primary tables must be checked before transcription.
+- **H-PUBLIC — Hospital-published information:** an authentic public hospital source, such as a package list; supports only the stated items and setting, not unreported operational data. Check the source and record its URL/access date before use.
 - **L-MECHANISM — Literature-supported mechanism:** a paper demonstrates or discusses a design concept, but does *not* necessarily validate our particular implementation.
 - **DESIGN — Project design choice:** proposed integration, interface or simplification, not directly established by the citation.
 - **SYNTHETIC — Artificial verification input:** invented solely to verify software behaviour.
@@ -24,11 +26,11 @@ Evidence types:
 |---|---|---|---|---|
 | R01 | Ongoing daily health examination centre, with sequential/walk-in arrivals | DESIGN | Deliberately different from Lv et al. 2026 **batch centralized** examination case. Its batch input does not establish our daily arrival process. | Confirm operational pattern with supervisor / partner centre |
 | R02 | 50% Agent simulation/verification, 40% existing-policy evaluation, 10% optional improvement | DESIGN | Agreed project scope, not a literature statistic. | Retain unless supervisor changes scope |
-| R03 | Patient, Examination Station/Resource and Routing agents | L-MECHANISM + DESIGN | Munavalli et al. 2020 motivates multi-agent real-time clinic coordination. Exact three-agent decomposition is ours. | Specify interfaces and observation boundaries |
-| R04 | Discrete-event clock underneath agent decisions, provisionally Python + SimPy | L-MECHANISM + DESIGN | Hybrid discrete-event and agent-based work exists in physical examination centres (Ying & Kittipittayakorn 2018). The Python/SimPy implementation choice is ours, not the cited paper's implementation. | Model 0 design review, then student implementation |
-| R05 | Route recommendation -> patient accepts/overrides **before queue entry** -> queue changes -> later recommendations | L-MECHANISM + DESIGN | Li et al. 2025 studies discretionary **queue switching** at a physical exam centre. Pre-queue recommendation override is a distinct behaviour; the paper does not, by itself, validate our pre-queue choice function. | Confirm workflow feasibility and separately calibrate behaviour |
-| R06 | Multiple exam packages and heterogeneous required tests | L-MECHANISM + DESIGN | Ho et al. 2021 documents differentiated health-exam sets/resources. Our proposed P1–P3 item lists are NOT that centre's observed packages. | Seek actual package list |
-| R07 | Existing online routing algorithms compared under common environment | L-MECHANISM + DESIGN | Chiu & Yeh 2010 and Jain et al. 2022 address dynamic / online scheduling. Specific baselines and reproductions need exact definition and fidelity checks. | Define shared policy API and faithful baseline sources |
+| R03 | Patient and Examination Station/Resource agents, with queue scheduling separated from Routing/flow decisions | L-MECHANISM + DESIGN | Munavalli et al. 2020 motivates multi-agent real-time clinic coordination; our decomposition and decision interfaces are project choices. Patient state, heterogeneity, observable information, decisions/actions and interactions are central; complex behaviour is not mandatory. | Specify service-selection and next-station interfaces and observation boundaries |
+| R04 | Discrete-event clock underneath agent decisions, Python + SimPy | L-MECHANISM + DESIGN | Hybrid discrete-event and agent-based work exists in physical examination centres (Ying & Kittipittayakorn 2018). The Python/SimPy implementation choice is ours, not the cited paper's implementation. | Retain Model 0 verification gate before stochastic extensions |
+| R05 | Patient state/requirements -> common legal flow -> queue entry -> station service selection -> updated patient/resource states | DESIGN; optional behaviour informed by L-MECHANISM | Queue Scheduling selects who is served next; Routing selects the next station. Pre-queue override remains an optional unvalidated hypothesis. Li et al. 2025 does not establish our pre-queue choice rule. | Keep flow and B0 common for initial queue-policy comparisons; assess B1/B2 separately |
+| R06 | Multiple exam packages and heterogeneous required tests | L-MECHANISM + DESIGN; candidate L-DATA / H-PUBLIC inputs | Ho et al. 2021 supports modelling differentiated exam sets/resources, not our synthetic P1–P3 lists. Checked literature or authentic hospital-published packages are acceptable sources. | Record source, items, station mapping and adaptations; do not infer package mix or operating data |
+| R07 | Existing Queue Scheduling Policies compared from an operational perspective under a common environment | DESIGN; policy sources need checking | FCFS is the only confirmed baseline. Chiu & Yeh 2010 and Jain et al. 2022 must be checked for their actual decision objects/rules before any queue-policy attribution; “scheduling” alone is insufficient. | Select other candidates later; define service-selection information and source fidelity |
 
 ## 3. Model 0: synthetic software-verification fixture
 
@@ -40,19 +42,19 @@ Evidence types:
 | M0-02 | Capacities | A=1, B=1, C=2 | Test single/multi-server constraints | Design-only |
 | M0-03 | Service times | A=4, B=3, C=5 minutes, deterministic | Hand-computable event traces | Design-only |
 | M0-04 | Packages | P1={A,B}, P2={B,C}, P3={A,B,C} | Exercise heterogeneous job sets | Design-only |
-| M0-05 | Fixed-route baseline | P1: A->B; P2: B->C; P3: A->B->C | Initial routing-policy fixture; **not** a clinical hard constraint | v1.1 clarification pending |
-| M0-06 | Precedence example | A must finish before C may begin for P3 | Test legality independently of routing policy; fictitious | Strengthen negative tests |
+| M0-05 | Fixed-route baseline | P1: A->B; P2: B->C; P3: A->B->C | Initial routing-policy fixture; **not** a clinical hard constraint or a queue-policy baseline | Design agreed in §9; not implemented/verified |
+| M0-06 | Precedence example | A must finish before C may begin for P3 | Test legality independently of routing policy; fictitious | T04 negative/positive semantics specified in §9; not executed |
 | M0-07 | Travel times | A<->B=1; B<->C=1; A<->C=2 minutes; entry->first=0 | Verify travel events and time accounting | Design-only |
 | M0-08 | Queue discipline | Shared FCFS queue; non-preemptive service | Minimal resource model | Design-only |
 | M0-09 | Patient behaviour | B0 full recommendation compliance | Isolate event and capacity correctness | Design-only |
-| M0-10 | Arrivals | Explicit deterministic times | Independent manual expected outcomes | Need test-by-test schedules |
+| M0-10 | Arrivals | Explicit deterministic times | Independent manual expected outcomes | Candidate test schedules/traces documented; student must independently recalculate (§9) |
 | M0-11 | Same-time event ordering, cutoff boundary | Provisional: completions/releases ahead of new admission/queue actions; admit at time <= cutoff | Make expected traces reproducible | **TO-CONFIRM** implementation feasibility and precise priorities in SimPy |
 
-**Known test-design issue:** Three arrivals at the centre do not necessarily imply three simultaneous arrivals at C when every route goes through B. Resource test T03 should inject three simultaneous *eligible service requests at C* in a station-level fixture. T04 must deliberately test rejection of an illegal next exam; simply following the fixed order is insufficient. The student must independently derive expected event times.
+**Test-design clarification (specified in §9, not executed):** Three arrivals at the centre do not necessarily imply three simultaneous arrivals at C when every route goes through B. Resource test T03 uses three simultaneous *eligible service requests at C* in a station-level fixture. T04 includes rejection of an illegal next exam and a positive legality check; simply following the fixed order is insufficient. The student must independently derive expected event times.
 
 ### Fixed route vs precedence
 
-A policy chooses *which* eligible exam to visit next; a precedence graph defines which exams are *allowed*. Never silently equate an A->B->C fixed-route policy with medical precedence A->B->C. In Model 0 the only example hard constraint is A-before-C for P3, unless a test explicitly sets a different synthetic graph.
+A routing policy chooses *which* eligible exam to visit next; a precedence graph defines which exams are *allowed*. Queue scheduling separately selects *which waiting patient* is served next at a station. Never silently equate an A->B->C fixed-route policy with medical precedence A->B->C. In Model 0 the only example hard constraint is A-before-C for P3, unless a test explicitly sets a different synthetic graph.
 
 ## 4. Model 1: candidate examination-centre configuration
 
@@ -64,12 +66,12 @@ These are **candidate** inputs, not yet a validated day-to-day centre dataset.
 | M1-02 | Parallel capacities in that case | US=4, ECG=2, Blood=3, Internal=1, X-ray=1, Ophthalmology=1 | L-DATA **reported in prior research notes**, not independently re-transcribed for this register | Cross-check original Table 12; do not generalize to all centres |
 | M1-03 | Mean exam time, minutes, case-specific | US male 7.32 / female 11.37; ECG 3.00; Blood 0.80; Internal 1.25; X-ray 1.00; Ophthalmology 1.30 | L-DATA **reported in prior research notes**; published means ≠ distributions | Cross-check units, population and original Table 12 |
 | M1-04 | Directed inter-item travel-time matrix | Candidate six-station submatrix of Lv et al. 2026 case | L-DATA + DESIGN; asymmetric values possible | Verify original Table 11 and extraction before storing numbers in configuration |
-| M1-05 | Synthetic P1/P2/P3 packages | P1=Blood+ECG+Internal+Ophthalmology; P2=P1+X-ray; P3=P2+Ultrasound | ASSUMPTION informed by multi-package literature; **not** observed medical packages | Ask partner centre; sensitivity to package mix |
+| M1-05 | Earlier synthetic P1/P2/P3 package candidates; sourced packages may replace them after checking | P1=Blood+ECG+Internal+Ophthalmology; P2=P1+X-ray; P3=P2+Ultrasound remain unconfirmed examples | ASSUMPTION; checked literature or authentic hospital-published lists may provide L-DATA / H-PUBLIC item inputs | Record source, item-to-station mapping, omissions/aggregation and assumptions; package proportions, arrivals and service durations require separate evidence |
 | M1-06 | Clinical precedence | No assumed clinical order by default; configurable verified constraints | TO-CONFIRM | Obtain medically/operationally grounded rules; do not infer from test fixture |
 | M1-07 | Arrival process | Initially homogeneous Poisson; later time-varying arrivals if evidenced | ASSUMPTION, **not** established by Lv batch arrival case | Collect timestamps or compare plausible alternative arrival processes |
 | M1-08 | Demand-rate scenarios | 20 / 35 / 45 examinees per hour were discussed as **tentative stress-test values** | ASSUMPTION, not empirical operating rates | **Do not freeze** without capacity/load check; vary demand systematically |
 | M1-09 | Service-duration variability | Deterministic then hypothetical Gamma distribution with CV=0.2 or 0.4 in sensitivity scenarios | ASSUMPTION; Lv case mean values do NOT identify a Gamma shape or CV | Fit from repeated durations if possible; otherwise label scenarios synthetic |
-| M1-10 | Queue discipline | One shared FCFS queue per station, parallel servers | DESIGN | Verify whether real centre has separate device queues/priority service |
+| M1-10 | Queue discipline | One shared queue per station, parallel servers; FCFS confirmed baseline, other policies undecided | DESIGN | Verify real queue organization; keep service selection separate from routing |
 | M1-11 | Service interruption | No preemption, no failures initially | DESIGN simplification | Revisit only if operationally material |
 | M1-12 | Intake cutoff | Example 480 min for admitting patients; continue model until admitted patients complete | ASSUMPTION / experiment convention | Check actual opening hours; report late-service and clearance time |
 | M1-13 | Patient demographics / ultrasound timing | Sex-dependent case means possible, but do **not** import Lv's batch cohort composition as a daily-centre population model | L-DATA + ASSUMPTION | Obtain representative demographics or report scenario dependence |
@@ -77,6 +79,8 @@ These are **candidate** inputs, not yet a validated day-to-day centre dataset.
 **Load sanity check, before choosing arrival rates:** for each station j, approximate offered load `rho_j = arrival_rate * Pr(package includes j) * mean_service_time_j / capacity_j`, with consistent time units. This is only a first-order screening formula; it does not replace the simulation.
 
 ## 5. Model 2: autonomous patient behaviour
+
+Patient state, heterogeneous requirements/attributes, observable information, decisions/actions and interactions belong to RQ1 from the initial model; Model 2 is an optional extension to richer behaviour, not the point at which patients first become agents. Simple explicit B0 behaviour is sufficient initially. After Model 0 verification, a verified Model 1 with common flow and B0 can support initial RQ2 queue-policy comparisons without waiting for Model 2. B1/B2 remain hypotheses to assess, not required or calibrated behaviours.
 
 | ID | Behaviour | Type | Evidence and limitation | Verification / validation |
 |---|---|---|---|---|
@@ -89,13 +93,15 @@ Observation boundary: agents cannot access future realized random service times.
 
 ## 6. Evaluation assumptions (RQ2)
 
+RQ2 concerns service order within station queues. Fixed route, shortest observed queue and shortest estimated wait were earlier routing candidates, not queue scheduling baselines; do not relabel them. Keep routing/flow common when isolating queue-policy effects.
+
 | ID | Decision | Evidence classification | Open issue |
 |---|---|---|---|
-| E01 | Baselines: fixed route, shortest observed queue, shortest estimated waiting time | DESIGN; motivated by routing literature | Formal tie-breaks, eligibility, expected-wait formula and source fidelity |
-| E02 | Optionally add literature-derived fuzzy/dynamic policy | L-MECHANISM + DESIGN | Exact reproduction vs explicitly labelled literature-inspired approximation |
-| E03 | Compare B0, B1, B2 across routing strategies and multiple demand scenarios | DESIGN | Factorial experiment design and behaviour calibration |
+| E01 | FCFS is the only confirmed Queue Scheduling baseline; other policies remain undecided | DESIGN | Identify candidate service-order rules, their information requirements, tie-breaks and primary sources before selection |
+| E02 | Consider additional existing queue scheduling policies only after source/decision-object checks | DESIGN; candidate L-MECHANISM subject to checking | Do not infer queue-policy evidence from a routing/batch-scheduling paper or from its title; distinguish reproduction from an explicitly labelled adaptation |
+| E03 | Initial comparisons may use verified Model 1, common flow and B0; optional B1/B2 extensions require separate assessment/verification | DESIGN | Do not make Model 2 a prerequisite or freeze behavioural factors and demand scenarios now |
 | E04 | Keep exogenous randomness paired between strategies | DESIGN experimental control | Same seed alone is insufficient if strategies consume RNG differently; use keyed streams / prerecorded arrivals, packages and per-patient per-station service samples |
-| E05 | Outcomes: mean and P95 waiting, cycle time, utilization, completion at cutoff and clearance time | DESIGN | Freeze unit of analysis, time windows, censoring and denominators before experiment |
+| E05 | Candidate outcomes: waiting (e.g., mean/P95), cycle time, equipment/resource utilization, completion at cutoff, clearance time and fairness | DESIGN; definitions not frozen | Select appropriate measures and define unit of analysis, time windows, censoring, denominators and fairness interpretation before experiments |
 | E06 | Independently repeated stochastic scenarios and uncertainty estimates | DESIGN | Specify replication count / interval computation before final evaluation |
 | E07 | Assess whether behaviour changes policy performance or ranking | **Unproven research hypothesis** | Do not presume ranking changes or significant effects |
 
@@ -104,12 +110,15 @@ Observation boundary: agents cannot access future realized random service times.
 1. **Operational validity:** obtain sample day arrivals, service durations, package proportions, resource counts and station locations if supervisor's hospital collaboration permits. Record confidentiality and data constraints.
 2. **Behavioural validity:** inspect Li et al. 2025 full study carefully for what exactly is switched, when, and what predictors are measured; do not equate queue abandonment with pre-queue override.
 3. **Primary source transcription:** verify every capacity, mean and matrix entry against original Lv 2026 tables before using Model 1 as literature-grounded numerical configuration.
-4. **Verification traceability:** finalize Model 0 v1.1 (policy/constraint separation, direct C capacity test, negative precedence test, exact same-time priorities, cutoff rule), then calculate expected traces independently.
-5. **Algorithm fairness:** predefine observable state, behaviour choice rules, independent random streams, metric windows and statistical uncertainty before RQ2.
+4. **Verification traceability:** Model 0 v1.1 policy/constraint separation, T03/T04 and cutoff semantics are design specified in §9. Confirm the still-open event/resource implementation approach, then independently recalculate expected traces and record actual tests.
+5. **Algorithm fairness:** verify sources and decision objects for queue-policy candidates; predefine shared flow, observable state, any behavioural assumptions, independent random streams, metric windows and statistical uncertainty before RQ2.
+6. **Package provenance:** checked literature packages and hospital-published lists are acceptable. Record source/URL, table/page or access date, original items, model-station mapping and assumptions. Such lists do not establish arrivals, package proportions, demographics, clinical order or service durations.
 
 ## 8. Reference register
 
 Citations below identify supporting literature for **the particular concepts noted above**; they do not imply those papers endorse the project's synthetic parameters.
+
+This is not a verified catalogue of Queue Scheduling Policies. Retain routing, batch-scheduling and behavioural studies for their actual claims; check the original decision object and rule before attributing any station-level service-order algorithm.
 
 - **Lv et al. (2026)**, *Optimization of Batch Centralized Health Examination Scheduling Considering Inter-Item Transition Time and Sex Differences*. https://doi.org/10.1002/hsr2.72912
 - **Munavalli et al. (2020)**, *An Intelligent Real-Time Scheduler for Out-Patient Clinics: A Multi-Agent System Model*. https://doi.org/10.1177/1460458220905380
@@ -137,9 +146,9 @@ This section supersedes any earlier v1.0 phrasing on Model 0 policy, precedence 
 | V11-10 | T01–T10 have independently checkable **candidate handwritten expected traces**; no tests executed or passed. | SYNTHETIC verification oracle | Student must recalculate and record actual traces |
 | V11-11 | SimPy dependency version and resource/dispatch approach remain unpinned. | TO-CONFIRM | Select version and commit approach before implementation |
 
-**Source audit clarification:** `L-DATA` does not itself mean source-checked. Use a separate proposed `source-checked` status only after actually examining the original full text/table. `verified-in-code` and `validated-empirically` are different claims; neither is currently earned.
+**Source audit clarification:** `L-DATA` and `H-PUBLIC` identify source types, not a source-checked status. Use a separate proposed `source-checked` status only after actually examining the original full text/table or hospital page. `verified-in-code` and `validated-empirically` are different claims; neither is currently earned.
 
-- **Munavalli et al. 2020:** multi-agent healthcare coordination is supported; our exact three-agent decomposition and active autonomous examinees are project choices, not direct observations from that work.
+- **Munavalli et al. 2020:** multi-agent healthcare coordination is supported; our agent decomposition and active autonomous examinees are project choices, not direct observations from that work.
 - **Ying & Kittipittayakorn 2018:** examination-centre DES + agent-based modelling has precedent; that does not establish that the paper used our Python/SimPy architecture.
 - **Li et al. 2025:** examinee deviations/queue-switching requests motivate investigation, but exact physical/virtual queue-entry and queue-exit timing is **needs-primary-check**. Our **pre-queue override** and B1/B2 rules are distinct unvalidated candidates.
 - **Ho et al. 2021:** multiple examination sets support modelling heterogeneous required tests, but not the specific synthetic P1–P3 definitions.
@@ -148,6 +157,12 @@ This section supersedes any earlier v1.0 phrasing on Model 0 policy, precedence 
 ### Implementation gate
 
 Model 0 v1.1 is **design specified but not implemented, not verified and not empirically validated**. Finalizing an event-handling approach, keeping state and resource ownership coherent, validating negative-case semantics, pinning SimPy version and deriving expected trace oracles independently are prerequisites to claiming Gate 1 completion.
+
+**Queue ownership design risk (not an observed runtime failure):** if a Station Agent's custom waiting list selects service order while native SimPy Resource requests also wait internally, two orderings may conflict. Choose a coherent owner of service selection and verify the custom-queue/resource interaction, capacity and FCFS traces. A full six-phase coordinator remains optional; no implementation approach is established by this warning.
+
+### Research direction update (2026-11-10)
+
+The working title and RQ2 now concern **Queue Scheduling Policies** (who is served next), separately from Routing (next station). FCFS alone is confirmed; other algorithms, metric definitions and experimental factors remain undecided. Patient Agent state, heterogeneity, observable information, behaviour and interactions remain central to RQ1, with no mandatory complex behaviour. Checked literature/hospital-public packages are allowed with provenance and explicit adaptations. Initial RQ2 may use verified Model 1 + common flow + B0; B1/B2 remain optional hypotheses. These changes do not alter Model 0 numerical rules, T01–T10 or their evidence status: design-only, no executed tests, no experimental findings.
 
 ## 10. Update procedure
 
