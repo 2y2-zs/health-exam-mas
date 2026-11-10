@@ -19,6 +19,7 @@ Later packages may use checked literature or authentic hospital public package i
 ## Project documents
 
 - [Research background and literature](docs/RESEARCH_CONTEXT.md)
+- [Literature library: verified titles, DOIs, links and research notes](docs/LITERATURE_LIBRARY.md)
 - [Simulation and Agent specification](docs/MODEL_SPEC.md)
 - [Model assumptions and evidence register](docs/MODEL_ASSUMPTIONS.md)
 - [Model 0 verification plan](docs/VERIFICATION_PLAN.md)
