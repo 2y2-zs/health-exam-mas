@@ -8,6 +8,7 @@ Current responsibilities:
 - Preserve deterministic iteration order: A, then B
 - Commit all due SERVICE_END events before any RESOURCE_RELEASE
 - Query the earliest active service completion across A and B
+- Process only the next service-completion bucket with a SimPy generator
 
 Arrivals, routing, travel scheduling, departure processing and
 the unified six-phase run() loop are not implemented yet.
@@ -152,3 +153,28 @@ class MultiStationCoordinator:
                     earliest = visit.ends_at
 
         return earliest
+
+    def process_next_service_completion(self):
+        """SimPy generator: process only the next service completion bucket.
+
+        Returns the released PatientAgent objects through Process.value.
+
+        If no active services exist, returns [] without a timeout.
+        If completion is due now, commits immediately without yield.
+        Otherwise, yields once to the earliest completion time.
+
+        The synchronous Phase 0/1 batch contains no yield.
+        """
+
+        next_time = self.next_service_completion_time()
+
+        if next_time is None:
+            # No active service; this does not mean the whole
+            # simulation has finished.
+            return []
+
+        if next_time > self.env.now:
+            yield self.env.timeout(next_time - self.env.now)
+
+        # No yield between SERVICE_END and RESOURCE_RELEASE.
+        return self.complete_due_services()

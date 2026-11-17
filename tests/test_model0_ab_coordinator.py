@@ -1,5 +1,5 @@
 
-"""Initialization, service completion and time-query tests for A/B Coordinator."""
+"""Tests for A/B initialization, service completion and scheduling boundaries."""
 
 import pytest
 import simpy
@@ -969,8 +969,6 @@ def test_next_service_completion_time_none_when_no_active_visits():
         assert station.resource.queue == []
         assert station.release_count == 0
 
-    # None is NOT evidence that the overall simulation is complete.
-
 
 def test_next_service_completion_time_rejects_overdue_active_visit():
     """An active visit ending before env.now must raise without mutation."""
@@ -1075,3 +1073,356 @@ def test_next_service_completion_time_rejects_overdue_active_visit():
         station_a.peak_resource_count,
         station_b.peak_resource_count,
     ) == counts_before
+
+
+def test_process_next_service_completion_same_time_batch():
+    """Generator waits until t=4 and commits A/B together."""
+
+    (
+        env,
+        coordinator,
+        station_a,
+        station_b,
+        log,
+        patient_a,
+        patient_b,
+    ) = prepare_ab_services_ending_at_t4()
+
+    assert env.now == 1.0
+    assert coordinator.next_service_completion_time() == 4.0
+
+    process = env.process(
+        coordinator.process_next_service_completion()
+    )
+
+    # Creating the process does not itself complete services.
+    assert patient_a.state == PatientState.IN_SERVICE
+    assert patient_b.state == PatientState.IN_SERVICE
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    env.run()
+
+    # The process must return the exact released patient objects.
+    assert process.triggered
+    assert len(process.value) == 2
+    assert process.value[0] is patient_a
+    assert process.value[1] is patient_b
+
+    assert env.now == 4.0
+
+    # Full same-time phase ordering, without sorting EventLog.
+    actual_t4 = [
+        (
+            record.phase,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+        if record.sim_time == 4.0
+    ]
+
+    assert actual_t4 == [
+        (0, "SERVICE_END", "A"),
+        (0, "SERVICE_END", "B"),
+        (1, "RESOURCE_RELEASE", "A"),
+        (1, "RESOURCE_RELEASE", "B"),
+    ]
+
+    assert patient_a.state == PatientState.FINISHED
+    assert patient_a.completed_tests == {"A"}
+    assert patient_b.state == PatientState.FINISHED
+    assert patient_b.completed_tests == {"B"}
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 1
+
+    assert coordinator.next_service_completion_time() is None
+
+    assert not [
+        record
+        for record in log.records
+        if record.event_type == "DEPARTURE"
+    ]
+
+    assert [
+        record.sequence_id
+        for record in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+
+def test_process_next_service_completion_staggered_batches():
+    """A finishes at 4; the next generator call finishes B at 5."""
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(
+        env,
+        station_id="A",
+    )
+    station_b = AOnlyCoordinatedStation(
+        env,
+        station_id="B",
+    )
+
+    log = EventLog(run_id="AB_GENERATOR_STAGGERED")
+
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={
+            "B": station_b,
+            "A": station_a,
+        },
+        event_log=log,
+    )
+
+    patient_a = PatientAgent("uA", 2, A_ONLY)
+    patient_b = PatientAgent("uB", 1, B_ONLY)
+
+    # A service [0,4).
+    patient_a.location = "A"
+    patient_a.state = PatientState.TRAVELLING
+    station_a.enqueue(patient_a, log)
+    station_a.start_available(log)
+
+    # B service [2,5).
+    env.run(until=2.0)
+
+    patient_b.location = "B"
+    patient_b.state = PatientState.TRAVELLING
+    station_b.enqueue(patient_b, log)
+    station_b.start_available(log)
+
+    assert env.now == 2.0
+    assert coordinator.next_service_completion_time() == 4.0
+
+    # First generator invocation: process only t=4.
+    first = env.process(
+        coordinator.process_next_service_completion()
+    )
+
+    env.run(until=4.5)
+
+    assert env.now == 4.5
+    assert first.triggered
+    assert len(first.value) == 1
+    assert first.value[0] is patient_a
+
+    assert patient_a.state == PatientState.FINISHED
+    assert patient_a.completed_tests == {"A"}
+
+    assert station_a.active == {}
+    assert station_a.resource.count == 0
+    assert station_a.release_count == 1
+
+    # B has not completed yet.
+    assert patient_b.state == PatientState.IN_SERVICE
+    assert patient_b.completed_tests == set()
+    assert len(station_b.active) == 1
+    assert station_b.resource.count == 1
+    assert station_b.release_count == 0
+
+    assert coordinator.next_service_completion_time() == 5.0
+
+    # Second generator invocation: process only t=5.
+    second = env.process(
+        coordinator.process_next_service_completion()
+    )
+
+    env.run()
+
+    assert env.now == 5.0
+    assert second.triggered
+    assert len(second.value) == 1
+    assert second.value[0] is patient_b
+
+    assert patient_b.state == PatientState.FINISHED
+    assert patient_b.completed_tests == {"B"}
+
+    assert coordinator.next_service_completion_time() is None
+
+    actual_completions = [
+        (
+            record.sim_time,
+            record.phase,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+        if record.event_type in (
+            "SERVICE_END",
+            "RESOURCE_RELEASE",
+        )
+    ]
+
+    assert actual_completions == [
+        (4.0, 0, "SERVICE_END", "A"),
+        (4.0, 1, "RESOURCE_RELEASE", "A"),
+        (5.0, 0, "SERVICE_END", "B"),
+        (5.0, 1, "RESOURCE_RELEASE", "B"),
+    ]
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 1
+
+    assert not [
+        record
+        for record in log.records
+        if record.event_type == "DEPARTURE"
+    ]
+
+    assert [
+        record.sequence_id
+        for record in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+
+def test_process_next_service_completion_due_now():
+    """When the next completion is already due, no timeout is needed."""
+
+    (
+        env,
+        coordinator,
+        station_a,
+        station_b,
+        log,
+        patient_a,
+        patient_b,
+    ) = prepare_ab_services_ending_at_t4()
+
+    # Move the clock externally to the exact due boundary.
+    env.run(until=4.0)
+
+    assert env.now == 4.0
+    assert coordinator.next_service_completion_time() == 4.0
+
+    process = env.process(
+        coordinator.process_next_service_completion()
+    )
+
+    env.run()
+
+    # The generator processes the current bucket at t=4,
+    # without advancing to a later time.
+    assert env.now == 4.0
+    assert process.triggered
+
+    assert len(process.value) == 2
+    assert process.value[0] is patient_a
+    assert process.value[1] is patient_b
+
+    assert [
+        (
+            record.phase,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+        if record.sim_time == 4.0
+    ] == [
+        (0, "SERVICE_END", "A"),
+        (0, "SERVICE_END", "B"),
+        (1, "RESOURCE_RELEASE", "A"),
+        (1, "RESOURCE_RELEASE", "B"),
+    ]
+
+    assert station_a.release_count == 1
+    assert station_b.release_count == 1
+
+    assert station_a.resource.count == 0
+    assert station_b.resource.count == 0
+
+    assert coordinator.next_service_completion_time() is None
+
+
+def test_process_next_service_completion_without_active_service():
+    """No active service returns [] without time advance or queue mutation."""
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(
+        env,
+        station_id="A",
+    )
+    station_b = AOnlyCoordinatedStation(
+        env,
+        station_id="B",
+    )
+
+    log = EventLog(run_id="AB_GENERATOR_NO_ACTIVE")
+
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={
+            "A": station_a,
+            "B": station_b,
+        },
+        event_log=log,
+    )
+
+    assert coordinator.next_service_completion_time() is None
+
+    # First call with no work at all.
+    first = env.process(
+        coordinator.process_next_service_completion()
+    )
+    env.run()
+
+    assert first.triggered
+    assert first.value == []
+    assert env.now == 0
+    assert log.records == []
+
+    # Add domain waiting work without starting service.
+    patient = PatientAgent("u1", 1, A_ONLY)
+    patient.location = "A"
+    patient.state = PatientState.TRAVELLING
+
+    station_a.enqueue(patient, log)
+
+    assert patient.state == PatientState.WAITING
+    assert len(station_a.waiting) == 1
+    assert station_a.active == {}
+
+    records_before = list(log.records)
+
+    # None does not mean the waiting queue has been drained.
+    assert coordinator.next_service_completion_time() is None
+
+    second = env.process(
+        coordinator.process_next_service_completion()
+    )
+    env.run()
+
+    assert second.triggered
+    assert second.value == []
+    assert env.now == 0
+
+    assert log.records == records_before
+
+    assert len(station_a.waiting) == 1
+    assert station_a.waiting[0].patient is patient
+
+    assert patient.state == PatientState.WAITING
+    assert patient.completed_tests == set()
+
+    assert station_a.active == {}
+    assert station_b.active == {}
+
+    for station in (station_a, station_b):
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 0
+
+    # The wider simulation still has a waiting patient.
