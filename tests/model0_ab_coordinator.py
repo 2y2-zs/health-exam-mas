@@ -1,29 +1,26 @@
-"""A/B multi-station Coordinator: initialization and validation only.
 
-This is the foundation for a future unified six-phase coordinator.
+"""A/B multi-station Coordinator: initialization and service completion.
 
 Current responsibilities:
 - Register exactly stations A and B
 - Validate that both stations share the Coordinator Environment
 - Validate dictionary keys against station.station_id
 - Preserve deterministic iteration order: A, then B
+- Commit all due SERVICE_END events before any RESOURCE_RELEASE
 
-No arrivals, travel scheduling, event processing or run() yet.
+Arrivals, routing, travel scheduling, departure processing and
+the unified six-phase run() loop are not implemented yet.
 """
 
 import simpy
 
-from health_exam_mas.model0 import EventLog
+from health_exam_mas.model0 import EventLog, PatientAgent
 
 from model0_a_only_prototype import AOnlyCoordinatedStation
 
 
 class MultiStationCoordinator:
-    """Register A and B in deterministic order.
-
-    Scheduling and six-phase event processing will be implemented
-    in later steps.
-    """
+    """Register A/B and coordinate synchronous service completion."""
 
     STATION_ORDER = ("A", "B")
 
@@ -89,3 +86,41 @@ class MultiStationCoordinator:
             for station_id in self.station_ids
         }
 
+    def complete_due_services(self) -> list[PatientAgent]:
+        """Synchronously commit due services across A and B.
+
+        Phase 0:
+            Collect and log every due SERVICE_END, in A -> B order.
+
+        Phase 1:
+            Release every collected batch, in A -> B order.
+
+        All SERVICE_END records precede every RESOURCE_RELEASE.
+        No yield, time advancement, routing or departure occurs.
+        """
+
+        # Phase 0: collect and record all service completions first.
+        due_by_station = {}
+
+        for station_id in self.station_ids:
+            station = self.stations[station_id]
+
+            due_by_station[station_id] = station.close_services(
+                self.event_log
+            )
+
+        # Phase 1: only after Phase 0 is fully completed,
+        # release resources and commit patient progress.
+        released: list[PatientAgent] = []
+
+        for station_id in self.station_ids:
+            station = self.stations[station_id]
+
+            released.extend(
+                station.release_services(
+                    due_by_station[station_id],
+                    self.event_log,
+                )
+            )
+
+        return released
