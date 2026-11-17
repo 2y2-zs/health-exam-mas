@@ -8,13 +8,13 @@ Supported:
 - Phase 3: validated zero-time entry routing and travel
 - Phase 4: atomic prevalidation and deterministic queue commitment
 - Phase 5: synchronous service dispatch
-- Positive-duration travel PLAN registration only (no execution)
+- Positive-duration travel registration and Phase 3 start (no arrival commit)
 - Service and arrival next-time queries
 - Component-only SimPy generators
 
 Not yet supported:
 - Positive-duration travel commitment/time selection in the unified coordinator
-- Phase 3 continuation after service release
+- Positive-duration travel completion and Phase 4 continuation
 - Full six-phase run() loop
 """
 
@@ -221,6 +221,121 @@ class MultiStationCoordinator:
 
         # No mutation occurs before this append.
         self.pending_travels.append(travel)
+
+    def start_next_travel(
+        self,
+        patient: PatientAgent,
+    ) -> ScheduledTravel:
+        """Phase 3: start the next positive-duration fixed-route move.
+
+        Called after Phase 1 releases an unfinished patient. Prevalidate
+        identity, state, visit ownership, fixed route, eligibility, and
+        directed travel duration. Register the plan before writing any
+        Phase 3 event, so registration failures leave patient/log intact.
+
+        Only TRAVEL_START occurs here; TRAVEL_END and Phase 4 queue entry
+        are deliberately deferred. No time advance or Resource request.
+        """
+        patient_id = patient.patient_id
+
+        if self._admitted_patients_by_id.get(patient_id) is not patient:
+            raise ValueError(
+                "Travel patient must be the original "
+                "Phase 2 admitted object"
+            )
+
+        if patient.state != PatientState.NEEDS_ROUTING:
+            raise ValueError(
+                f"Patient {patient_id!r} must be NEEDS_ROUTING "
+                "before starting continued travel"
+            )
+
+        if (
+            patient.active_visit_id is not None
+            or patient.active_station_id is not None
+        ):
+            raise ValueError(
+                f"Patient {patient_id!r} has an active visit"
+            )
+
+        destination = recommend_fixed_route(
+            patient.package,
+            patient.completed_tests,
+        )
+        if destination is None:
+            raise ValueError(
+                f"Patient {patient_id!r} has no remaining fixed-route test"
+            )
+        if destination not in self.stations:
+            raise ValueError(
+                f"Travel destination {destination!r} "
+                "is not managed by this Coordinator"
+            )
+        if destination not in eligible_stations(
+            patient.package,
+            patient.completed_tests,
+        ):
+            raise ValueError(
+                f"Travel destination {destination!r} "
+                f"is not eligible for patient {patient_id!r}"
+            )
+
+        origin = patient.location
+        try:
+            duration = MODEL0_TRAVEL_TIMES[(origin, destination)]
+        except KeyError as exc:
+            raise ValueError(
+                f"Unknown directed travel route {origin!r} -> "
+                f"{destination!r}"
+            ) from exc
+        if duration <= 0:
+            raise ValueError(
+                "start_next_travel requires positive travel duration"
+            )
+
+        travel = ScheduledTravel(
+            patient=patient,
+            origin=origin,
+            destination=destination,
+            started_at=self.env.now,
+            ends_at=self.env.now + duration,
+        )
+
+        # The single plan-append is committed before any Phase 3 log
+        # or patient state change. It rejects an existing pending move.
+        self.register_travel(travel)
+
+        transition_patient_state(
+            patient=patient,
+            event_log=self.event_log,
+            sim_time=self.env.now,
+            event_type="DECIDING",
+            new_state=PatientState.DECIDING,
+            phase=3,
+        )
+
+        self.event_log.record(
+            sim_time=self.env.now,
+            event_type="ROUTE_DECISION",
+            patient_id=patient_id,
+            prior_state=PatientState.DECIDING,
+            new_state=PatientState.DECIDING,
+            recommended_station=destination,
+            chosen_station=destination,
+            phase=3,
+        )
+
+        transition_patient_state(
+            patient=patient,
+            event_log=self.event_log,
+            sim_time=self.env.now,
+            event_type="TRAVEL_START",
+            new_state=PatientState.TRAVELLING,
+            station_id=destination,
+            phase=3,
+        )
+
+        return travel
 
     def commit_due_arrivals(self) -> list[PatientAgent]:
         """Phase 2: validate and commit all arrivals due at env.now."""

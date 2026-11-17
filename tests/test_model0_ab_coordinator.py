@@ -4613,3 +4613,213 @@ def test_register_travel_invalid_plan_is_atomic(failure):
         assert station.resource.count == 0
         assert station.resource.users == []
         assert station.resource.queue == []
+
+
+# ==========================================================
+# Phase 3: start positive-duration continuation after release
+# ==========================================================
+
+
+def test_start_next_travel_p1_a_to_b_at_t4():
+    """P1 released at t=4 starts A -> B [4,5) without arriving at B."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    before = list(log.records)
+
+    travel = coordinator.start_next_travel(patient)
+
+    assert len(coordinator.pending_travels) == 1
+    assert coordinator.pending_travels[0] is travel
+    assert travel.patient is patient
+    assert (
+        travel.origin,
+        travel.destination,
+        travel.started_at,
+        travel.ends_at,
+    ) == ("A", "B", 4.0, 5.0)
+
+    assert env.now == 4.0
+    assert patient.state == PatientState.TRAVELLING
+    assert patient.location == "A"
+    assert patient.completed_tests == {"A"}
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+
+    assert log.records[:len(before)] == before
+    t4 = [record for record in log.records if record.sim_time == 4.0]
+    assert [record.phase for record in t4] == [0, 1, 3, 3, 3]
+    assert [record.event_type for record in t4] == [
+        "SERVICE_END",
+        "RESOURCE_RELEASE",
+        "DECIDING",
+        "ROUTE_DECISION",
+        "TRAVEL_START",
+    ]
+    assert [record.patient_id for record in t4] == ["u1"] * 5
+    assert t4[2].prior_state == PatientState.NEEDS_ROUTING
+    assert t4[2].new_state == PatientState.DECIDING
+    assert t4[3].prior_state == PatientState.DECIDING
+    assert t4[3].new_state == PatientState.DECIDING
+    assert t4[3].recommended_station == "B"
+    assert t4[3].chosen_station == "B"
+    assert t4[4].prior_state == PatientState.DECIDING
+    assert t4[4].new_state == PatientState.TRAVELLING
+    assert t4[4].station_id == "B"
+    assert [record.sequence_id for record in log.records] == list(
+        range(1, len(log.records) + 1)
+    )
+
+    # A pending travel is not yet a scheduled event-bucket completion.
+    assert coordinator.next_event_time() is None
+    assert coordinator._ready_for_queue == {}
+    assert not [
+        record for record in log.records
+        if record.sim_time == 4.0 and record.event_type in (
+            "TRAVEL_END", "QUEUE_ENTRY", "SERVICE_START",
+        )
+    ]
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+
+def test_start_next_travel_rejects_existing_pending_without_side_effects():
+    """Registering the plan first must prevent a partial Phase 3 start."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    pending = ScheduledTravel(patient, "A", "B", 4.0, 5.0)
+    coordinator.register_travel(pending)
+
+    records_before = list(log.records)
+    plans_before = list(coordinator.pending_travels)
+    patient_before = (
+        patient.state, patient.location, set(patient.completed_tests),
+        patient.active_visit_id, patient.active_station_id,
+    )
+
+    with pytest.raises(ValueError, match="already has a pending travel"):
+        coordinator.start_next_travel(patient)
+
+    assert coordinator.pending_travels == plans_before
+    assert len(coordinator.pending_travels) == 1
+    assert coordinator.pending_travels[0] is pending
+    assert log.records == records_before
+    assert env.now == 4.0
+    assert (
+        patient.state, patient.location, patient.completed_tests,
+        patient.active_visit_id, patient.active_station_id,
+    ) == patient_before
+    assert patient.state == PatientState.NEEDS_ROUTING
+    assert coordinator._ready_for_queue == {}
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+
+def test_start_next_travel_rejects_second_start_without_side_effects():
+    """After TRAVEL_START the state is TRAVELLING; cannot start twice."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    travel = coordinator.start_next_travel(patient)
+
+    records_before = list(log.records)
+    plans_before = list(coordinator.pending_travels)
+    patient_before = (
+        patient.state, patient.location, set(patient.completed_tests),
+        patient.active_visit_id, patient.active_station_id,
+    )
+
+    with pytest.raises(ValueError, match="must be NEEDS_ROUTING"):
+        coordinator.start_next_travel(patient)
+
+    assert coordinator.pending_travels == plans_before == [travel]
+    assert coordinator.pending_travels[0] is travel
+    assert log.records == records_before
+    assert env.now == 4.0
+    assert (
+        patient.state, patient.location, patient.completed_tests,
+        patient.active_visit_id, patient.active_station_id,
+    ) == patient_before
+    assert patient.state == PatientState.TRAVELLING
+    assert patient.location == "A"
+    assert coordinator._ready_for_queue == {}
+    assert sum(r.event_type == "TRAVEL_START" for r in log.records) == 2
+    # One zero-time ENTRY -> A and one positive-duration A -> B.
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ["impostor", "wrong_state", "active_visit", "no_remaining_test"],
+)
+def test_start_next_travel_invalid_patient_has_no_side_effects(invalid):
+    """Invalid identity/state/visit/fixed-route leaves the batch intact."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    candidate = patient
+    if invalid == "impostor":
+        candidate = PatientAgent("u1", 1, P1_CONFIG)
+        candidate.state = PatientState.NEEDS_ROUTING
+        candidate.location = "A"
+        candidate.completed_tests.add("A")
+        error = "original Phase 2 admitted object"
+    elif invalid == "wrong_state":
+        patient.state = PatientState.WAITING
+        error = "must be NEEDS_ROUTING"
+    elif invalid == "active_visit":
+        patient.active_visit_id = "unexpected-visit"
+        error = "active visit"
+    elif invalid == "no_remaining_test":
+        patient.completed_tests.add("B")
+        error = "no remaining fixed-route test"
+    else:
+        raise AssertionError(invalid)
+
+    records_before = list(log.records)
+    plans_before = list(coordinator.pending_travels)
+    patient_before = (
+        patient.state, patient.location, set(patient.completed_tests),
+        patient.active_visit_id, patient.active_station_id,
+    )
+    candidate_before = (
+        candidate.state, candidate.location, set(candidate.completed_tests),
+        candidate.active_visit_id, candidate.active_station_id,
+    )
+
+    with pytest.raises(ValueError, match=error):
+        coordinator.start_next_travel(candidate)
+
+    assert coordinator.pending_travels == plans_before == []
+    assert log.records == records_before
+    assert env.now == 4.0
+    assert (
+        patient.state, patient.location, patient.completed_tests,
+        patient.active_visit_id, patient.active_station_id,
+    ) == patient_before
+    assert (
+        candidate.state, candidate.location, candidate.completed_tests,
+        candidate.active_visit_id, candidate.active_station_id,
+    ) == candidate_before
+    assert coordinator._ready_for_queue == {}
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
