@@ -8,11 +8,12 @@ Supported:
 - Phase 3: validated zero-time entry routing and travel
 - Phase 4: atomic prevalidation and deterministic queue commitment
 - Phase 5: synchronous service dispatch
+- Positive-duration travel PLAN registration only (no execution)
 - Service and arrival next-time queries
 - Component-only SimPy generators
 
 Not yet supported:
-- Positive-duration travel in the unified coordinator
+- Positive-duration travel commitment/time selection in the unified coordinator
 - Phase 3 continuation after service release
 - Full six-phase run() loop
 """
@@ -35,6 +36,7 @@ from health_exam_mas.model0 import (
 from model0_a_only_prototype import (
     AOnlyCoordinatedStation,
     ScheduledArrival,
+    ScheduledTravel,
 )
 
 
@@ -102,6 +104,10 @@ class MultiStationCoordinator:
 
         self.pending_arrivals: list[ScheduledArrival] = []
 
+        # Positive-duration travel plans are registered, not executed.
+        # Scheduling/travel commitment will be handled in a later phase.
+        self.pending_travels: list[ScheduledTravel] = []
+
         # Persistent ID history, including consumed arrival plans.
         self._registered_arrival_ids: set[str] = set()
 
@@ -137,6 +143,84 @@ class MultiStationCoordinator:
 
         self.pending_arrivals.append(arrival)
         self._registered_arrival_ids.add(patient_id)
+
+    def register_travel(self, travel: ScheduledTravel) -> None:
+        """Register a positive-duration move without executing it.
+
+        Only the exact object admitted by Phase 2 can schedule a move.
+        Travel must start now from the patient's current location,
+        have a managed/eligible destination, and end at precisely the
+        travel-matrix-defined time. No overlapping pending travel is
+        allowed for the same patient ID.
+
+        All validation precedes the single append. In particular this
+        method does not advance time, change any patient, write a log,
+        reserve a Resource or emit TRAVEL_START / TRAVEL_END.
+        """
+        patient = travel.patient
+        patient_id = patient.patient_id
+
+        if self._admitted_patients_by_id.get(patient_id) is not patient:
+            raise ValueError(
+                "Travel patient must be the original "
+                "Phase 2 admitted object"
+            )
+
+        if (
+            patient.active_visit_id is not None
+            or patient.active_station_id is not None
+        ):
+            raise ValueError(
+                "Cannot register travel with an active visit"
+            )
+
+        if travel.started_at != self.env.now:
+            raise ValueError(
+                "Travel must start at current simulation time"
+            )
+
+        if travel.origin != patient.location:
+            raise ValueError(
+                "Travel origin must match patient location"
+            )
+
+        if travel.destination not in self.stations:
+            raise ValueError(
+                "Travel destination is not managed by this Coordinator"
+            )
+
+        if travel.destination not in eligible_stations(
+            patient.package, patient.completed_tests
+        ):
+            raise ValueError(
+                "Travel destination is not eligible for patient"
+            )
+
+        try:
+            duration = MODEL0_TRAVEL_TIMES[
+                (travel.origin, travel.destination)
+            ]
+        except KeyError as exc:
+            raise ValueError("Unknown directed travel route") from exc
+
+        if duration <= 0:
+            raise ValueError(
+                "register_travel requires positive travel duration"
+            )
+
+        if travel.ends_at != travel.started_at + duration:
+            raise ValueError(
+                "Travel completion time does not match travel matrix"
+            )
+
+        if any(
+            pending.patient.patient_id == patient_id
+            for pending in self.pending_travels
+        ):
+            raise ValueError("Patient already has a pending travel")
+
+        # No mutation occurs before this append.
+        self.pending_travels.append(travel)
 
     def commit_due_arrivals(self) -> list[PatientAgent]:
         """Phase 2: validate and commit all arrivals due at env.now."""

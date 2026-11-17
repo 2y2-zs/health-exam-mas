@@ -14,6 +14,7 @@ from health_exam_mas.model0 import (
 from model0_a_only_prototype import (
     AOnlyCoordinatedStation,
     ScheduledArrival,
+    ScheduledTravel,
 )
 
 from model0_ab_coordinator import MultiStationCoordinator, ReadyQueueEntry
@@ -4405,3 +4406,210 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
     # but the integration test stops at t=0.
     assert coordinator.next_event_time() == 3.0
     assert env.now == 0.0
+
+
+# ==========================================================
+# Positive-duration travel: registration only
+# ==========================================================
+
+
+def _prepare_released_p1_at_t4():
+    """P1 is admitted, served at A [0,4), and released for A -> B."""
+    env = simpy.Environment()
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id="AB_POSITIVE_TRAVEL_REGISTRATION")
+    coordinator = MultiStationCoordinator(
+        env, {"B": station_b, "A": station_a}, log
+    )
+    patient = PatientAgent("u1", 1, P1_CONFIG)
+    coordinator.register_arrival(ScheduledArrival(0.0, patient))
+
+    bucket = env.process(coordinator.process_next_event_bucket())
+    env.run(until=bucket)
+    released, arrived = bucket.value
+    assert released == []
+    assert arrived == [patient]
+
+    ready = coordinator.route_entry_arrivals(arrived)
+    assert ready == [patient]
+    assert patient.location == "A"
+    assert coordinator.commit_queue_entries(ready) == [patient]
+    coordinator.dispatch_available_services()
+    assert patient.state == PatientState.IN_SERVICE
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 0
+    assert next(iter(station_a.active.values())).ends_at == 4.0
+
+    env.run(until=4.0)
+    released = coordinator.complete_due_services()
+    assert released == [patient]
+    assert env.now == 4.0
+    assert patient.state == PatientState.NEEDS_ROUTING
+    assert patient.location == "A"
+    assert patient.completed_tests == {"A"}
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+    assert coordinator.pending_travels == []
+    assert station_a.active == {} and station_b.active == {}
+    assert station_a.resource.count == 0
+    assert station_b.resource.count == 0
+    return env, coordinator, station_a, station_b, log, patient
+
+
+def test_register_travel_p1_a_to_b_at_t4():
+    """Register A -> B [4,5); no TRAVEL_START or time advancement."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    travel = ScheduledTravel(
+        patient=patient,
+        origin="A",
+        destination="B",
+        started_at=4.0,
+        ends_at=5.0,
+    )
+    records_before = list(log.records)
+    patient_before = (
+        patient.state, patient.location, set(patient.completed_tests),
+        patient.active_visit_id, patient.active_station_id,
+    )
+    assert coordinator.register_travel(travel) is None
+    assert len(coordinator.pending_travels) == 1
+    assert coordinator.pending_travels[0] is travel
+    assert (travel.origin, travel.destination, travel.started_at, travel.ends_at) == (
+        "A", "B", 4.0, 5.0
+    )
+    assert env.now == 4.0
+    assert log.records == records_before
+    assert (
+        patient.state, patient.location, patient.completed_tests,
+        patient.active_visit_id, patient.active_station_id,
+    ) == patient_before
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+    assert not [
+        r for r in log.records
+        if r.sim_time == 4.0 and r.event_type in ("TRAVEL_START", "TRAVEL_END")
+    ]
+
+
+def test_register_travel_rejects_duplicate_without_side_effects():
+    """A pending travel cannot be registered a second time."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    first = ScheduledTravel(patient, "A", "B", 4.0, 5.0)
+    second = ScheduledTravel(patient, "A", "B", 4.0, 5.0)
+    coordinator.register_travel(first)
+
+    records_before = list(log.records)
+    plans_before = list(coordinator.pending_travels)
+    with pytest.raises(ValueError, match="already has a pending travel"):
+        coordinator.register_travel(second)
+
+    assert coordinator.pending_travels == plans_before
+    assert len(coordinator.pending_travels) == 1
+    assert coordinator.pending_travels[0] is first
+    assert log.records == records_before
+    assert env.now == 4.0
+    assert patient.state == PatientState.NEEDS_ROUTING
+    assert patient.location == "A"
+    assert patient.completed_tests == {"A"}
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "wrong_end_time",
+        "impostor",
+        "wrong_start_time",
+        "wrong_origin",
+        "unmanaged_destination",
+        "ineligible_destination",
+        "active_visit",
+    ],
+)
+def test_register_travel_invalid_plan_is_atomic(failure):
+    """All bad plans fail before state, EventLog or plan mutation."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    travel_patient = patient
+    origin, destination = "A", "B"
+    started_at, ends_at = 4.0, 5.0
+    if failure == "wrong_end_time":
+        ends_at = 5.5
+        error = "does not match travel matrix"
+    elif failure == "impostor":
+        travel_patient = PatientAgent("u1", 1, P1_CONFIG)
+        travel_patient.state = PatientState.NEEDS_ROUTING
+        travel_patient.location = "A"
+        travel_patient.completed_tests.add("A")
+        error = "original Phase 2 admitted object"
+    elif failure == "wrong_start_time":
+        started_at = 3.0
+        error = "must start at current simulation time"
+    elif failure == "wrong_origin":
+        origin = "B"
+        error = "origin must match patient location"
+    elif failure == "unmanaged_destination":
+        destination = "C"
+        error = "not managed"
+    elif failure == "ineligible_destination":
+        destination = "A"
+        error = "not eligible"
+    elif failure == "active_visit":
+        patient.active_visit_id = "unexpected-visit"
+        error = "active visit"
+    else:
+        raise AssertionError(f"Unexpected failure {failure!r}")
+
+    bad_plan = ScheduledTravel(
+        patient=travel_patient, origin=origin, destination=destination,
+        started_at=started_at, ends_at=ends_at,
+    )
+    records_before = list(log.records)
+    plans_before = list(coordinator.pending_travels)
+    admitted_before = dict(coordinator._admitted_patients_by_id)
+    state_before = (
+        patient.state, patient.location, set(patient.completed_tests),
+        patient.active_visit_id, patient.active_station_id,
+    )
+    other_before = (
+        travel_patient.state, travel_patient.location,
+        set(travel_patient.completed_tests), travel_patient.active_visit_id,
+        travel_patient.active_station_id,
+    )
+
+    with pytest.raises(ValueError, match=error):
+        coordinator.register_travel(bad_plan)
+    assert coordinator.pending_travels == plans_before == []
+    assert log.records == records_before
+    assert env.now == 4.0
+    assert coordinator._admitted_patients_by_id == admitted_before
+    assert (
+        patient.state, patient.location, patient.completed_tests,
+        patient.active_visit_id, patient.active_station_id,
+    ) == state_before
+    assert (
+        travel_patient.state, travel_patient.location,
+        travel_patient.completed_tests, travel_patient.active_visit_id,
+        travel_patient.active_station_id,
+    ) == other_before
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
