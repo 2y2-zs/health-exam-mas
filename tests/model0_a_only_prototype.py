@@ -1,3 +1,4 @@
+
 """Single-station, deterministic coordination prototype for Model 0.
 
 Domain phases commit synchronously within each time bucket. Entry travel is
@@ -14,6 +15,7 @@ from health_exam_mas.model0 import (
     ENTRY_LOCATION,
     MODEL0_STATIONS,
     MODEL0_TRAVEL_TIMES,
+    P1_CONFIG,
     EventLog,
     PatientAgent,
     PatientState,
@@ -469,6 +471,91 @@ class AOnlyCoordinator:
         self.pending_travels.append(travel)
         self._patients_by_id[travel.patient.patient_id] = travel.patient
 
+    def start_next_travel(self, patient: PatientAgent) -> ScheduledTravel:
+        """Phase 3 boundary: start P1 travel A -> B without advancing time.
+
+        Register the complete plan before emitting routing/travel events.
+        Failed validation leaves patient, log, and pending travel unchanged.
+        """
+        if patient.state != PatientState.NEEDS_ROUTING:
+            raise ValueError("start_next_travel requires NEEDS_ROUTING")
+        if patient.active_visit_id is not None or patient.active_station_id is not None:
+            raise ValueError("Cannot start next travel with an active visit")
+        if patient.package != P1_CONFIG:
+            raise ValueError("start_next_travel currently supports P1 only")
+        if self.station.station_id != "B":
+            raise ValueError("P1 continuation requires Coordinator station B")
+        if patient.location != "A":
+            raise ValueError("P1 continuation must originate at A")
+        if patient.completed_tests != {"A"}:
+            raise ValueError("P1 continuation requires completed tests {'A'}")
+
+        destination = recommend_fixed_route(
+            patient.package,
+            patient.completed_tests,
+        )
+        if destination != self.station.station_id:
+            raise ValueError(
+                "Fixed Route recommendation must match managed station"
+            )
+        if destination not in eligible_stations(
+            patient.package,
+            patient.completed_tests,
+        ):
+            raise ValueError("Recommended next station is not eligible")
+
+        origin = patient.location
+        try:
+            duration = MODEL0_TRAVEL_TIMES[(origin, destination)]
+        except KeyError as exc:
+            raise ValueError("Unknown directed travel route") from exc
+
+        if duration <= 0:
+            raise ValueError("Next travel requires positive duration")
+
+        travel = ScheduledTravel(
+            patient=patient,
+            origin=origin,
+            destination=destination,
+            started_at=self.env.now,
+            ends_at=self.env.now + duration,
+        )
+
+        # Complete registration before changing state or writing events.
+        self.register_travel(travel)
+
+        transition_patient_state(
+            patient=patient,
+            event_log=self.event_log,
+            sim_time=self.env.now,
+            event_type="DECIDING",
+            new_state=PatientState.DECIDING,
+            phase=3,
+        )
+
+        self.event_log.record(
+            sim_time=self.env.now,
+            event_type="ROUTE_DECISION",
+            patient_id=patient.patient_id,
+            prior_state=PatientState.DECIDING,
+            new_state=PatientState.DECIDING,
+            recommended_station=destination,
+            chosen_station=destination,
+            phase=3,
+        )
+
+        transition_patient_state(
+            patient=patient,
+            event_log=self.event_log,
+            sim_time=self.env.now,
+            event_type="TRAVEL_START",
+            new_state=PatientState.TRAVELLING,
+            station_id=destination,
+            phase=3,
+        )
+
+        return travel
+
     def commit_due_travels(self) -> list[PatientAgent]:
         """Phase 3: validate due moves, then commit locations without queue entry."""
 
@@ -655,7 +742,10 @@ class AOnlyCoordinator:
             )
         return batch
 
-    def _route_entry_arrivals(self, batch: list[PatientAgent]) -> list[PatientAgent]:
+    def _route_entry_arrivals(
+        self,
+        batch: list[PatientAgent],
+    ) -> list[PatientAgent]:
         """Phase 3: route entry arrivals and finish their zero-time moves."""
 
         zero_travel_completions: list[
