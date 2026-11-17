@@ -3236,3 +3236,455 @@ def test_process_next_event_bucket_no_scheduled_event():
 
     # The absence of scheduled events is not proof that the
     # domain has no remaining work.
+
+# ==========================================================
+# Phase 3: ENTRY -> first station, zero-time travel
+# ==========================================================
+
+from health_exam_mas.model0 import P1_CONFIG
+
+
+def _make_ab_phase3_fixture():
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+
+    log = EventLog(run_id="AB_PHASE3_ENTRY")
+
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={"B": station_b, "A": station_a},
+        event_log=log,
+    )
+
+    return env, coordinator, station_a, station_b, log
+
+
+def test_route_entry_arrivals_p1_reaches_a_without_queue_or_resource():
+    """P1 arrives at t=0, then moves ENTRY -> A in Phase 3."""
+
+    env, coordinator, station_a, station_b, log = (
+        _make_ab_phase3_fixture()
+    )
+
+    patient = PatientAgent("u1", 1, P1_CONFIG)
+
+    coordinator.register_arrival(
+        ScheduledArrival(at=0.0, patient=patient)
+    )
+
+    # Phase 2: the ARRIVAL must actually be committed first.
+    arrived = coordinator.commit_due_arrivals()
+
+    assert len(arrived) == 1
+    assert arrived[0] is patient
+
+    assert patient.state == PatientState.ARRIVED
+    assert patient.location == "ENTRY"
+
+    assert [
+        (r.phase, r.event_type)
+        for r in log.records
+    ] == [
+        (2, "ARRIVAL"),
+    ]
+
+    # Phase 3: a separate synchronous call.
+    ready = coordinator.route_entry_arrivals(arrived)
+
+    assert len(ready) == 1
+    assert ready[0] is patient
+
+    assert env.now == 0.0
+
+    assert patient.state == PatientState.TRAVELLING
+    assert patient.location == "A"
+    assert patient.completed_tests == set()
+
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+
+    # Verify the exact state-transition contract.
+    assert [
+        (
+            r.phase,
+            r.event_type,
+            r.prior_state,
+            r.new_state,
+            r.station_id,
+        )
+        for r in log.records
+    ] == [
+        (2, "ARRIVAL", None, PatientState.ARRIVED, None),
+        (
+            3, "NEEDS_ROUTING",
+            PatientState.ARRIVED,
+            PatientState.NEEDS_ROUTING,
+            None,
+        ),
+        (
+            3, "DECIDING",
+            PatientState.NEEDS_ROUTING,
+            PatientState.DECIDING,
+            None,
+        ),
+        (
+            3, "ROUTE_DECISION",
+            PatientState.DECIDING,
+            PatientState.DECIDING,
+            None,
+        ),
+        (
+            3, "TRAVEL_START",
+            PatientState.DECIDING,
+            PatientState.TRAVELLING,
+            "A",
+        ),
+        (
+            3, "TRAVEL_END",
+            PatientState.TRAVELLING,
+            PatientState.TRAVELLING,
+            "A",
+        ),
+    ]
+
+    decision = next(
+        r for r in log.records
+        if r.event_type == "ROUTE_DECISION"
+    )
+    assert decision.recommended_station == "A"
+    assert decision.chosen_station == "A"
+
+    assert all(r.sim_time == 0.0 for r in log.records)
+
+    assert [
+        r.sequence_id for r in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+    # ENTRY travel does not perform Phase 4 or Phase 5.
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 0
+        assert station.peak_resource_count == 0
+
+    assert not [
+        r for r in log.records
+        if r.event_type in ("QUEUE_ENTRY", "SERVICE_START")
+    ]
+
+
+def test_route_entry_arrivals_stable_order_with_reverse_input():
+    """Phase 3 sorts by rank and ID, regardless of input order.
+
+    All TRAVEL_START records precede all zero-time TRAVEL_END records.
+    """
+
+    env, coordinator, station_a, station_b, log = (
+        _make_ab_phase3_fixture()
+    )
+
+    u3 = PatientAgent("u3", 2, P1_CONFIG)
+    u2 = PatientAgent("u2", 1, B_ONLY)
+    u1 = PatientAgent("u1", 1, P1_CONFIG)
+
+    # Reverse registration order.
+    for patient in (u3, u2, u1):
+        coordinator.register_arrival(
+            ScheduledArrival(0.0, patient)
+        )
+
+    arrived = coordinator.commit_due_arrivals()
+
+    assert arrived == [u1, u2, u3]
+
+    # Deliberately reverse the list again before Phase 3.
+    ready = coordinator.route_entry_arrivals(
+        list(reversed(arrived))
+    )
+
+    assert ready == [u1, u2, u3]
+    assert env.now == 0.0
+
+    assert [
+        (r.phase, r.patient_id, r.event_type)
+        for r in log.records
+    ] == [
+        (2, "u1", "ARRIVAL"),
+        (2, "u2", "ARRIVAL"),
+        (2, "u3", "ARRIVAL"),
+
+        (3, "u1", "NEEDS_ROUTING"),
+        (3, "u1", "DECIDING"),
+        (3, "u1", "ROUTE_DECISION"),
+        (3, "u1", "TRAVEL_START"),
+
+        (3, "u2", "NEEDS_ROUTING"),
+        (3, "u2", "DECIDING"),
+        (3, "u2", "ROUTE_DECISION"),
+        (3, "u2", "TRAVEL_START"),
+
+        (3, "u3", "NEEDS_ROUTING"),
+        (3, "u3", "DECIDING"),
+        (3, "u3", "ROUTE_DECISION"),
+        (3, "u3", "TRAVEL_START"),
+
+        (3, "u1", "TRAVEL_END"),
+        (3, "u2", "TRAVEL_END"),
+        (3, "u3", "TRAVEL_END"),
+    ]
+
+    expected_destinations = {
+        "u1": "A",
+        "u2": "B",
+        "u3": "A",
+    }
+
+    for r in log.records:
+        if r.event_type == "ROUTE_DECISION":
+            expected = expected_destinations[r.patient_id]
+            assert r.recommended_station == expected
+            assert r.chosen_station == expected
+
+        if r.event_type in ("TRAVEL_START", "TRAVEL_END"):
+            assert r.station_id == expected_destinations[r.patient_id]
+
+    assert u1.location == "A"
+    assert u2.location == "B"
+    assert u3.location == "A"
+
+    for patient in (u1, u2, u3):
+        assert patient.state == PatientState.TRAVELLING
+        assert patient.completed_tests == set()
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+    assert [
+        r.sequence_id for r in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "unmanaged_destination",
+        "duplicate_same_object",
+        "duplicate_id_different_object",
+    ],
+)
+def test_route_entry_arrivals_rejects_invalid_batch_atomically(
+    failure,
+):
+    """An invalid later item cannot partially route an earlier patient."""
+
+    env, coordinator, station_a, station_b, log = (
+        _make_ab_phase3_fixture()
+    )
+
+    valid = PatientAgent("u1", 1, P1_CONFIG)
+
+    if failure == "unmanaged_destination":
+        # C is eligible for this package, but not managed by A/B.
+        c_only = PackageConfig(
+            required_tests=frozenset({"C"}),
+            fixed_route=("C",),
+            hard_precedence=frozenset(),
+        )
+        second = PatientAgent("u2", 2, c_only)
+    else:
+        second = PatientAgent("u2", 2, B_ONLY)
+
+    for patient in (valid, second):
+        coordinator.register_arrival(
+            ScheduledArrival(0.0, patient)
+        )
+
+    arrived = coordinator.commit_due_arrivals()
+
+    if failure == "unmanaged_destination":
+        batch = [valid, second]
+        error_message = "not managed"
+    elif failure == "duplicate_same_object":
+        batch = [valid, second, valid]
+        error_message = "Duplicate patient ID"
+    else:
+        duplicate = PatientAgent("u1", 3, P1_CONFIG)
+        batch = [valid, second, duplicate]
+        error_message = "Duplicate patient ID"
+
+    log_before = list(log.records)
+    pending_before = list(coordinator.pending_arrivals)
+
+    patient_before = [
+        (
+            p,
+            p.state,
+            p.location,
+            set(p.completed_tests),
+            p.active_visit_id,
+            p.active_station_id,
+        )
+        for p in (valid, second)
+    ]
+
+    routed_ids_before = set(coordinator._entry_routed_ids)
+
+    with pytest.raises(ValueError, match=error_message):
+        coordinator.route_entry_arrivals(batch)
+
+    # No Phase 3 event was appended for ANY patient.
+    assert log.records == log_before
+    assert all(r.phase == 2 for r in log.records)
+
+    assert coordinator.pending_arrivals == pending_before
+    assert coordinator._entry_routed_ids == routed_ids_before
+
+    assert env.now == 0.0
+
+    for (
+        patient,
+        state,
+        location,
+        completed,
+        visit_id,
+        station_id,
+    ) in patient_before:
+        assert patient.state == state
+        assert patient.location == location
+        assert patient.completed_tests == completed
+        assert patient.active_visit_id == visit_id
+        assert patient.active_station_id == station_id
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+    # The original Phase 2 result is still usable after an error.
+    assert arrived == [valid, second]
+
+
+def test_route_entry_arrivals_cannot_move_patient_twice():
+    """A completed ENTRY move cannot be committed again."""
+
+    env, coordinator, station_a, station_b, log = (
+        _make_ab_phase3_fixture()
+    )
+
+    patient = PatientAgent("u1", 1, P1_CONFIG)
+
+    coordinator.register_arrival(
+        ScheduledArrival(0.0, patient)
+    )
+
+    arrived = coordinator.commit_due_arrivals()
+    assert coordinator.route_entry_arrivals(arrived) == [patient]
+
+    assert patient.location == "A"
+    assert patient.state == PatientState.TRAVELLING
+
+    log_before = list(log.records)
+    state_before = patient.state
+    location_before = patient.location
+
+    with pytest.raises(
+        ValueError,
+        match="Entry travel already committed",
+    ):
+        coordinator.route_entry_arrivals([patient])
+
+    assert log.records == log_before
+    assert patient.state == state_before
+    assert patient.location == location_before
+
+    assert coordinator._entry_routed_ids == {"u1"}
+    assert env.now == 0.0
+
+    assert sum(
+        r.event_type == "TRAVEL_START"
+        for r in log.records
+    ) == 1
+
+    assert sum(
+        r.event_type == "TRAVEL_END"
+        for r in log.records
+    ) == 1
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.queue == []
+
+
+def test_route_entry_arrivals_requires_actual_phase2_admission():
+    """Registration alone is insufficient; a cloned ID is insufficient."""
+
+    env, coordinator, station_a, station_b, log = (
+        _make_ab_phase3_fixture()
+    )
+
+    patient = PatientAgent("u1", 1, P1_CONFIG)
+
+    coordinator.register_arrival(
+        ScheduledArrival(0.0, patient)
+    )
+
+    # A registered but not yet admitted patient cannot move.
+    with pytest.raises(
+        ValueError,
+        match="has not been admitted",
+    ):
+        coordinator.route_entry_arrivals([patient])
+
+    assert patient.state == PatientState.ARRIVED
+    assert patient.location == "ENTRY"
+    assert log.records == []
+
+    arrived = coordinator.commit_due_arrivals()
+
+    # Even after admission, a different object with the same ID
+    # cannot impersonate the actual Phase 2 patient.
+    impostor = PatientAgent("u1", 1, P1_CONFIG)
+
+    log_before = list(log.records)
+
+    with pytest.raises(
+        ValueError,
+        match="has not been admitted",
+    ):
+        coordinator.route_entry_arrivals([impostor])
+
+    assert log.records == log_before
+    assert patient.state == PatientState.ARRIVED
+    assert patient.location == "ENTRY"
+
+    # The true admitted patient can still route successfully.
+    assert coordinator.route_entry_arrivals(arrived) == [patient]
+
+    assert patient.state == PatientState.TRAVELLING
+    assert patient.location == "A"
+    assert impostor.state == PatientState.ARRIVED
+    assert impostor.location == "ENTRY"
+
+    assert env.now == 0.0
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
