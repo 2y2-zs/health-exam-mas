@@ -1,28 +1,8 @@
+"""Single-station, deterministic coordination prototype for Model 0.
 
-"""Single-station, deterministic, six-phase coordination prototype for Model 0.
-
-This module is separate from the legacy model0.py processes.
-
-The coordinator manages one station at a time. Predeclared entry arrivals
-support zero-duration ENTRY -> station travel. Registered positive-duration
-travels can also be completed and admitted to the managed station.
-
-The six domain phases are:
-
-    0. SERVICE_END
-    1. RESOURCE_RELEASE and progress commit
-    2. ARRIVAL
-    3. Routing, Travel and DEPARTURE
-    4. QUEUE_ENTRY
-    5. SERVICE_START
-
-There is no yield between phases of the same simulated time bucket.
-
-The Station releases all completed visits, including patients who still
-need another test. The Coordinator currently rejects unsupported multi-station
-continuation rather than silently dropping those patients.
-
-This is still a single-station prototype, not full A -> B coordination.
+Domain phases commit synchronously within each time bucket. Entry travel is
+zero-time; registered positive-duration travel joins the same station queue.
+This is separate from the native processes; multi-station flow is still pending.
 """
 
 from dataclasses import dataclass
@@ -150,8 +130,7 @@ class AOnlyCoordinatedStation:
 
         visit_id = f"{patient.patient_id}:visit:1"
 
-        # Active visit fields belong to Phase 4,
-        # not Phase 3 travel.
+        # Queue entry establishes visit ownership; travel reserves no capacity.
         patient.active_visit_id = visit_id
         patient.active_station_id = self.station_id
 
@@ -221,13 +200,7 @@ class AOnlyCoordinatedStation:
         due: list[ActiveVisit],
         event_log: EventLog,
     ) -> list[PatientAgent]:
-        """Phase 1: release every due visit and commit patient progress.
-
-        Return all released patients, including those in NEEDS_ROUTING.
-        Station does not decide whether continuation is supported.
-
-        No yield occurs inside this method.
-        """
+        """Phase 1: release visits and return all patients, including unfinished ones."""
 
         # Validate the whole batch before changing any visit or resource.
         visit_ids: set[str] = set()
@@ -243,18 +216,14 @@ class AOnlyCoordinatedStation:
             patient = visit.patient
             del self.active[visit.visit_id]
 
-            # Release the Resource exactly once.
             self.resource.release(visit.request)
             self.release_count += 1
 
-            # Commit this Station's completed test.
             patient.completed_tests.add(self.station_id)
 
-            # Clear the active visit fields.
             patient.active_visit_id = None
             patient.active_station_id = None
 
-            # The Station commits the next patient state.
             new_state = (
                 PatientState.FINISHED
                 if patient.package.required_tests.issubset(
@@ -278,8 +247,6 @@ class AOnlyCoordinatedStation:
                 phase=1,
             )
 
-            # Both FINISHED and NEEDS_ROUTING are valid
-            # Station release outcomes.
             released.append(patient)
 
         return released
@@ -372,8 +339,7 @@ class AOnlyCoordinator:
 
         self.pending = list(arrivals)
 
-        # Planned positive-duration travel completions.
-        # This list is NOT the Station waiting queue.
+        # Planned moves do not belong to the station waiting queue.
         self.pending_travels: list[ScheduledTravel] = []
 
         patient_ids = [
@@ -431,21 +397,13 @@ class AOnlyCoordinator:
         self,
         travel: ScheduledTravel,
     ) -> None:
-        """Validate and register a positive-duration travel plan.
+        """Register a positive travel plan without state, log or resource changes."""
 
-        This method only appends a validated plan.
-        It does not move patients, advance time,
-        write events or allocate resources.
-        """
-
-        # 1. Travel starts now.
         if travel.started_at != self.env.now:
             raise ValueError(
                 "Travel must start at current simulation time"
             )
 
-        # 2. Destination must match the managed station
-        #    and be eligible for the patient.
         if travel.destination != self.station.station_id:
             raise ValueError(
                 "Travel destination must match managed station"
@@ -459,13 +417,11 @@ class AOnlyCoordinator:
                 "Travel destination is not eligible for patient"
             )
 
-        # 3. Origin must match the patient's location.
         if travel.origin != travel.patient.location:
             raise ValueError(
                 "Travel origin must match patient location"
             )
 
-        # 4. Duration must match the directed matrix.
         try:
             duration = MODEL0_TRAVEL_TIMES[
                 (travel.origin, travel.destination)
@@ -486,7 +442,6 @@ class AOnlyCoordinator:
                 "match travel matrix"
             )
 
-        # 5. No active visit.
         if (
             travel.patient.active_visit_id is not None
             or travel.patient.active_station_id is not None
@@ -495,7 +450,6 @@ class AOnlyCoordinator:
                 "Cannot register travel with an active visit"
             )
 
-        # 6. No other pending plan for this patient.
         if any(
             pending.patient.patient_id
             == travel.patient.patient_id
@@ -516,11 +470,7 @@ class AOnlyCoordinator:
         self._patients_by_id[travel.patient.patient_id] = travel.patient
 
     def commit_due_travels(self) -> list[PatientAgent]:
-        """Phase 3: commit due positive-duration travel completions.
-
-        Validate the entire batch before any mutations.
-        Do not enqueue, reserve capacity, reroute or record TRAVEL_START.
-        """
+        """Phase 3: validate due moves, then commit locations without queue entry."""
 
         now = self.env.now
 
@@ -582,7 +532,6 @@ class AOnlyCoordinator:
                     "Cannot commit travel with an active visit"
                 )
 
-        # Commit the completed moves in stable patient order.
         for travel in due:
             patient = travel.patient
 
@@ -614,16 +563,10 @@ class AOnlyCoordinator:
         self,
         released: Iterable[PatientAgent],
     ) -> None:
-        """Phase 3: commit departures for fully completed patients only.
-
-        Validate the entire released batch before logging any DEPARTURE.
-        NEEDS_ROUTING is explicitly unsupported by this Coordinator.
-        """
+        """Phase 3: validate the released batch before recording any departure."""
 
         released = list(released)
 
-        # Validate every released patient first.
-        # Never silently discard NEEDS_ROUTING patients.
         for patient in released:
             if patient.state == PatientState.NEEDS_ROUTING:
                 raise NotImplementedError(
@@ -637,7 +580,6 @@ class AOnlyCoordinator:
                     f"resource release: {patient.state}"
                 )
 
-        # Only a fully validated batch may depart.
         for patient in released:
             self.event_log.record(
                 sim_time=self.env.now,
@@ -648,8 +590,167 @@ class AOnlyCoordinator:
                 phase=3,
             )
 
+    def _next_event_time(self) -> float:
+        """Select a time bucket and reject stalled or overdue work."""
+
+        times = [
+            arrival.at
+            for arrival in self.pending
+        ]
+
+        times.extend(
+            travel.ends_at
+            for travel in self.pending_travels
+        )
+
+        times.extend(
+            visit.ends_at
+            for visit in self.station.active.values()
+        )
+
+        if not times:
+            raise RuntimeError(
+                "Waiting visitors without future events"
+            )
+
+        if any(
+            travel.ends_at < self.env.now
+            for travel in self.pending_travels
+        ):
+            raise RuntimeError(
+                "Overdue pending travel completion"
+            )
+
+        return min(times)
+
+    def _commit_arrivals(self) -> list[PatientAgent]:
+        """Phase 2: record all arrivals before routing any patient."""
+
+        batch = sorted(
+            (
+                item.patient
+                for item in self.pending
+                if item.at == self.env.now
+            ),
+            key=lambda patient: (
+                patient.patient_rank,
+                patient.patient_id,
+            ),
+        )
+
+        self.pending = [
+            item
+            for item in self.pending
+            if item.at != self.env.now
+        ]
+
+        for patient in batch:
+            self.event_log.record(
+                sim_time=self.env.now,
+                event_type="ARRIVAL",
+                patient_id=patient.patient_id,
+                prior_state=None,
+                new_state=PatientState.ARRIVED,
+                phase=2,
+            )
+        return batch
+
+    def _route_entry_arrivals(self, batch: list[PatientAgent]) -> list[PatientAgent]:
+        """Phase 3: route entry arrivals and finish their zero-time moves."""
+
+        zero_travel_completions: list[
+            tuple[PatientAgent, str]
+        ] = []
+
+        for patient in batch:
+            transition_patient_state(
+                patient=patient,
+                event_log=self.event_log,
+                sim_time=self.env.now,
+                event_type="NEEDS_ROUTING",
+                new_state=PatientState.NEEDS_ROUTING,
+                phase=3,
+            )
+
+            transition_patient_state(
+                patient=patient,
+                event_log=self.event_log,
+                sim_time=self.env.now,
+                event_type="DECIDING",
+                new_state=PatientState.DECIDING,
+                phase=3,
+            )
+
+            station_id = recommend_fixed_route(
+                patient.package,
+                patient.completed_tests,
+            )
+
+            if station_id != self.station.station_id:
+                raise ValueError(
+                    "Fixed Route recommendation must "
+                    "match the station"
+                )
+
+            self.event_log.record(
+                sim_time=self.env.now,
+                event_type="ROUTE_DECISION",
+                patient_id=patient.patient_id,
+                prior_state=PatientState.DECIDING,
+                new_state=PatientState.DECIDING,
+                recommended_station=station_id,
+                chosen_station=station_id,
+                phase=3,
+            )
+
+            if patient.location != ENTRY_LOCATION:
+                raise ValueError(
+                    "Single-station entry travel "
+                    "must start at ENTRY"
+                )
+
+            travel_duration = MODEL0_TRAVEL_TIMES[
+                (patient.location, station_id)
+            ]
+
+            if travel_duration != 0.0:
+                raise ValueError(
+                    "Entry arrivals in this prototype require "
+                    f"ENTRY -> {station_id} travel of 0.0"
+                )
+
+            transition_patient_state(
+                patient=patient,
+                event_log=self.event_log,
+                sim_time=self.env.now,
+                event_type="TRAVEL_START",
+                new_state=PatientState.TRAVELLING,
+                station_id=station_id,
+                phase=3,
+            )
+
+            zero_travel_completions.append(
+                (patient, station_id)
+            )
+
+        # Commit all entry zero-time travel in Phase 3.
+        # No timeout(0), no yield.
+        for patient, station_id in zero_travel_completions:
+            patient.location = station_id
+
+            self.event_log.record(
+                sim_time=self.env.now,
+                event_type="TRAVEL_END",
+                patient_id=patient.patient_id,
+                prior_state=PatientState.TRAVELLING,
+                new_state=PatientState.TRAVELLING,
+                station_id=station_id,
+                phase=3,
+            )
+        return [patient for patient, _ in zero_travel_completions]
+
     def run(self):
-        """Run all six phases, yielding only between time buckets."""
+        """Run synchronous phases, yielding only between time buckets."""
 
         while (
             self.pending
@@ -657,245 +758,39 @@ class AOnlyCoordinator:
             or self.station.active
             or self.station.waiting
         ):
-            # -----------------------------------------
-            # Select the next simulation time
-            # -----------------------------------------
-            times = [
-                arrival.at
-                for arrival in self.pending
-            ]
-
-            times.extend(
-                travel.ends_at
-                for travel in self.pending_travels
-            )
-
-            times.extend(
-                visit.ends_at
-                for visit in self.station.active.values()
-            )
-
-            if not times:
-                raise RuntimeError(
-                    "Waiting visitors without future events"
-                )
-
-            if any(
-                travel.ends_at < self.env.now
-                for travel in self.pending_travels
-            ):
-                raise RuntimeError(
-                    "Overdue pending travel completion"
-                )
-
-            next_time = min(times)
-
+            next_time = self._next_event_time()
             if next_time > self.env.now:
-                yield self.env.timeout(
-                    next_time - self.env.now
-                )
-
+                yield self.env.timeout(next_time - self.env.now)
             if next_time != self.env.now:
-                raise RuntimeError(
-                    "Coordinator failed to reach next time bucket"
-                )
+                raise RuntimeError("Coordinator failed to reach next time bucket")
 
-            # No yield from Phase 0 through Phase 5.
+            # Phase 0: complete every due service before any release.
+            completed = self.station.close_services(self.event_log)
 
-            # -----------------------------------------
-            # Phase 0: SERVICE_END
-            # -----------------------------------------
-            completed = self.station.close_services(
-                self.event_log
-            )
+            # Phase 1: release resources and commit patient progress.
+            released = self.station.release_services(completed, self.event_log)
 
-            # -----------------------------------------
-            # Phase 1: RESOURCE_RELEASE
-            # -----------------------------------------
-            released = self.station.release_services(
-                completed,
-                self.event_log,
-            )
+            # Phase 2: admit all arrivals in the current time bucket.
+            batch = self._commit_arrivals()
 
-            # -----------------------------------------
-            # Phase 2: ARRIVAL
-            # -----------------------------------------
-            batch = sorted(
-                (
-                    item.patient
-                    for item in self.pending
-                    if item.at == self.env.now
-                ),
-                key=lambda patient: (
-                    patient.patient_rank,
-                    patient.patient_id,
-                ),
-            )
-
-            self.pending = [
-                item
-                for item in self.pending
-                if item.at != self.env.now
-            ]
-
-            for patient in batch:
-                self.event_log.record(
-                    sim_time=self.env.now,
-                    event_type="ARRIVAL",
-                    patient_id=patient.patient_id,
-                    prior_state=None,
-                    new_state=PatientState.ARRIVED,
-                    phase=2,
-                )
-
-            # -----------------------------------------
-            # Phase 3: Routing / Departure / Travel
-            # -----------------------------------------
-
-            # Coordinator rejects any unsupported continuation.
-            # No DEPARTURE is logged for NEEDS_ROUTING.
+            # Phase 3: departures, due travel, then entry routing and zero moves.
             self.commit_departures(released)
+            positive_travel_completions = self.commit_due_travels()
+            zero_travel_completions = self._route_entry_arrivals(batch)
 
-            # Positive-duration travel completions do not
-            # repeat ARRIVAL, Routing, or TRAVEL_START.
-            positive_travel_completions = (
-                self.commit_due_travels()
-            )
-
-            zero_travel_completions: list[
-                tuple[PatientAgent, str]
-            ] = []
-
-            for patient in batch:
-                transition_patient_state(
-                    patient=patient,
-                    event_log=self.event_log,
-                    sim_time=self.env.now,
-                    event_type="NEEDS_ROUTING",
-                    new_state=PatientState.NEEDS_ROUTING,
-                    phase=3,
-                )
-
-                transition_patient_state(
-                    patient=patient,
-                    event_log=self.event_log,
-                    sim_time=self.env.now,
-                    event_type="DECIDING",
-                    new_state=PatientState.DECIDING,
-                    phase=3,
-                )
-
-                station_id = recommend_fixed_route(
-                    patient.package,
-                    patient.completed_tests,
-                )
-
-                if station_id != self.station.station_id:
-                    raise ValueError(
-                        "Fixed Route recommendation must "
-                        "match the station"
-                    )
-
-                self.event_log.record(
-                    sim_time=self.env.now,
-                    event_type="ROUTE_DECISION",
-                    patient_id=patient.patient_id,
-                    prior_state=PatientState.DECIDING,
-                    new_state=PatientState.DECIDING,
-                    recommended_station=station_id,
-                    chosen_station=station_id,
-                    phase=3,
-                )
-
-                if patient.location != ENTRY_LOCATION:
-                    raise ValueError(
-                        "Single-station entry travel "
-                        "must start at ENTRY"
-                    )
-
-                travel_duration = MODEL0_TRAVEL_TIMES[
-                    (patient.location, station_id)
-                ]
-
-                if travel_duration != 0.0:
-                    raise ValueError(
-                        "Entry arrivals in this prototype require "
-                        f"ENTRY -> {station_id} travel of 0.0"
-                    )
-
-                transition_patient_state(
-                    patient=patient,
-                    event_log=self.event_log,
-                    sim_time=self.env.now,
-                    event_type="TRAVEL_START",
-                    new_state=PatientState.TRAVELLING,
-                    station_id=station_id,
-                    phase=3,
-                )
-
-                zero_travel_completions.append(
-                    (patient, station_id)
-                )
-
-            # Commit all entry zero-time travel in Phase 3.
-            # No timeout(0), no yield.
-            for patient, station_id in zero_travel_completions:
-                patient.location = station_id
-
-                self.event_log.record(
-                    sim_time=self.env.now,
-                    event_type="TRAVEL_END",
-                    patient_id=patient.patient_id,
-                    prior_state=PatientState.TRAVELLING,
-                    new_state=PatientState.TRAVELLING,
-                    station_id=station_id,
-                    phase=3,
-                )
-
-            # -----------------------------------------
-            # Phase 4: QUEUE_ENTRY
-            # -----------------------------------------
-
-            ready_to_queue = (
-                positive_travel_completions
-                + [
-                    patient
-                    for patient, _ in zero_travel_completions
-                ]
-            )
-
-            ready_ids = [
-                patient.patient_id
-                for patient in ready_to_queue
-            ]
-
+            # Phase 4: merge all ready patients before queue entry.
+            ready_to_queue = positive_travel_completions + zero_travel_completions
+            ready_ids = [patient.patient_id for patient in ready_to_queue]
             if len(ready_ids) != len(set(ready_ids)):
-                raise ValueError(
-                    "Duplicate patient ID in Phase 4 "
-                    "queue-entry batch"
-                )
+                raise ValueError("Duplicate patient ID in Phase 4 queue-entry batch")
 
             ready_to_queue.sort(
-                key=lambda patient: (
-                    patient.patient_rank,
-                    patient.patient_id,
-                )
+                key=lambda patient: (patient.patient_rank, patient.patient_id)
             )
-
             for patient in ready_to_queue:
-                self.station.enqueue(
-                    patient,
-                    self.event_log,
-                )
+                self.station.enqueue(patient, self.event_log)
 
-            # -----------------------------------------
-            # Phase 5: SERVICE_START
-            # -----------------------------------------
-            self.station.start_available(
-                self.event_log
-            )
-
+            # Phase 5: select FCFS visits and request only available capacity.
+            self.station.start_available(self.event_log)
             if self.station.resource.queue:
-                raise RuntimeError(
-                    "Unexpected Resource waiting requests"
-                )
+                raise RuntimeError("Unexpected Resource waiting requests")

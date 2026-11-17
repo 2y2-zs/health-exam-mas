@@ -1,18 +1,4 @@
-
-"""Tests for the single-station six-phase coordination prototype.
-
-Coverage:
-- Rank-based tie breaking and FCFS
-- Same-time service completion batches
-- Phase numbering and state lifecycle
-- Zero-time travel
-- Service release and departure boundaries
-- Positive travel plan registration
-- Direct positive travel completion boundary
-- Integrated positive travel completion and service at B
-- Mixed travel sources completing at the same time
-- Station release of unfinished P1 after A
-"""
+"""Verification of single-station coordination and rejection boundaries."""
 
 import simpy
 import pytest
@@ -70,22 +56,52 @@ EVENT_PHASES = {
 }
 
 
+def prepare_b_travel(
+    *, patient_id="u1", patient_rank=1, arrivals=(), run_id="B_TRAVEL"
+):
+    """Prepare t=4 with B and a P1 patient who has completed A."""
+    env = simpy.Environment()
+    env.run(until=4.0)
+    assert env.now == 4.0
+    station = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id=run_id)
+    coordinator = AOnlyCoordinator(env, station, log, arrivals)
+    patient = PatientAgent(patient_id, patient_rank, P1_CONFIG)
+    patient.location = "A"
+    patient.state = PatientState.DECIDING
+    patient.completed_tests.add("A")
+    return env, station, log, coordinator, patient
+
+
+def assert_empty_station(station):
+    """Check queue/resource cleanup without requiring patient completion."""
+    assert station.waiting == []
+    assert station.active == {}
+    assert station.resource.count == 0
+    assert station.resource.users == []
+    assert station.resource.queue == []
+
+
+def patient_snapshot(patient):
+    return (
+        patient.state,
+        patient.location,
+        frozenset(patient.completed_tests),
+        patient.active_visit_id,
+        patient.active_station_id,
+    )
+
+
 def run_scenario(arrivals, station_id="A"):
     """Build one independent single-station simulation."""
 
     env = simpy.Environment()
 
-    station = AOnlyCoordinatedStation(
-        env,
-        station_id=station_id,
-    )
+    station = AOnlyCoordinatedStation(env, station_id=station_id)
 
     log = EventLog(run_id="A_ONLY_PROTOTYPE")
 
-    packages = {
-        "A": A_ONLY,
-        "C": C_ONLY,
-    }
+    packages = {'A': A_ONLY, 'B': B_ONLY, 'C': C_ONLY}
 
     patients = {
         patient_id: PatientAgent(
@@ -104,12 +120,7 @@ def run_scenario(arrivals, station_id="A"):
         for patient_id, _, time in arrivals
     ]
 
-    coordinator = AOnlyCoordinator(
-        env=env,
-        station=station,
-        event_log=log,
-        arrivals=scheduled,
-    )
+    coordinator = AOnlyCoordinator(env=env, station=station, event_log=log, arrivals=scheduled)
 
     env.process(coordinator.run())
     env.run()
@@ -127,11 +138,7 @@ def only(records, patient_id, event_type):
         and record.event_type == event_type
     ]
 
-    assert len(matching) == 1, (
-        patient_id,
-        event_type,
-        matching,
-    )
+    assert len(matching) == 1, (patient_id, event_type, matching)
 
     return matching[0]
 
@@ -142,19 +149,13 @@ def assert_phase_contract(records):
     for record in records:
         assert record.event_type in EVENT_PHASES, record
 
-        assert (
-            record.phase
-            == EVENT_PHASES[record.event_type]
-        ), record
+        assert record.phase == EVENT_PHASES[record.event_type], record
 
     for earlier, later in zip(records, records[1:]):
         assert earlier.sim_time <= later.sim_time
 
         if earlier.sim_time == later.sim_time:
-            assert earlier.phase <= later.phase, (
-                earlier,
-                later,
-            )
+            assert earlier.phase <= later.phase, (earlier, later)
 
 
 def assert_travel_and_state_lifecycle(
@@ -173,41 +174,17 @@ def assert_travel_and_state_lifecycle(
     ]
 
     for patient_id in patients:
-        arrival = only(
-            records,
-            patient_id,
-            "ARRIVAL",
-        )
+        arrival = only(records, patient_id, 'ARRIVAL')
 
-        start = only(
-            records,
-            patient_id,
-            "TRAVEL_START",
-        )
+        start = only(records, patient_id, 'TRAVEL_START')
 
-        end = only(
-            records,
-            patient_id,
-            "TRAVEL_END",
-        )
+        end = only(records, patient_id, 'TRAVEL_END')
 
-        entry = only(
-            records,
-            patient_id,
-            "QUEUE_ENTRY",
-        )
+        entry = only(records, patient_id, 'QUEUE_ENTRY')
 
-        service = only(
-            records,
-            patient_id,
-            "SERVICE_START",
-        )
+        service = only(records, patient_id, 'SERVICE_START')
 
-        assert (
-            start.sim_time
-            == end.sim_time
-            == arrival.sim_time
-        )
+        assert start.sim_time == end.sim_time == arrival.sim_time
 
         assert (start.phase, end.phase) == (3, 3)
 
@@ -220,12 +197,7 @@ def assert_travel_and_state_lifecycle(
         assert end.prior_state == PatientState.TRAVELLING
         assert end.new_state == PatientState.TRAVELLING
 
-        assert (
-            start.sequence_id
-            < end.sequence_id
-            < entry.sequence_id
-            < service.sequence_id
-        )
+        assert start.sequence_id < end.sequence_id < entry.sequence_id < service.sequence_id
 
         state_changes = [
             record.new_state
@@ -237,10 +209,7 @@ def assert_travel_and_state_lifecycle(
             )
         ]
 
-        assert state_changes == expected_states, (
-            patient_id,
-            state_changes,
-        )
+        assert state_changes == expected_states, (patient_id, state_changes)
 
 
 def assert_cleanup(
@@ -260,26 +229,15 @@ def assert_cleanup(
 
     assert_phase_contract(log.records)
 
-    assert_travel_and_state_lifecycle(
-        log.records,
-        patients,
-        station_id=station_id,
-    )
+    assert_travel_and_state_lifecycle(log.records, patients, station_id=station_id)
 
-    expected_capacity = (
-        1 if station_id == "A" else 2
-    )
+    expected_capacity = {"A": 1, "B": 1, "C": 2}[station_id]
 
     assert station.resource.capacity == expected_capacity
     assert station.peak_resource_count == expected_capacity
     assert station.release_count == len(patients)
 
-    assert station.waiting == []
-    assert station.active == {}
-
-    assert station.resource.users == []
-    assert station.resource.queue == []
-    assert station.resource.count == 0
+    assert_empty_station(station)
 
     for patient in patients.values():
         assert patient.state == PatientState.FINISHED
@@ -293,10 +251,7 @@ def assert_cleanup(
 def test_a_only_reverse_creation_order_still_uses_rank():
     """Rank wins the same-time tie, independent of input order."""
 
-    env, station, log, patients = run_scenario([
-        ("u2", 2, 0.0),
-        ("u1", 1, 0.0),
-    ])
+    env, station, log, patients = run_scenario([('u2', 2, 0.0), ('u1', 1, 0.0)])
 
     records = log.records
 
@@ -339,13 +294,7 @@ def test_a_only_reverse_creation_order_still_uses_rank():
         8.0,
     ]
 
-    assert_cleanup(
-        env,
-        station,
-        log,
-        patients,
-        end_time=8.0,
-    )
+    assert_cleanup(env, station, log, patients, end_time=8.0)
 
 
 def test_a_only_completion_release_before_same_time_arrivals():
@@ -407,21 +356,11 @@ def test_a_only_completion_release_before_same_time_arrivals():
         16.0,
     ]
 
-    u2_entry = only(
-        records,
-        "u2",
-        "QUEUE_ENTRY",
-    )
+    u2_entry = only(records, 'u2', 'QUEUE_ENTRY')
 
-    u2_start = only(
-        records,
-        "u2",
-        "SERVICE_START",
-    )
+    u2_start = only(records, 'u2', 'SERVICE_START')
 
-    assert (
-        u2_start.sim_time - u2_entry.sim_time
-    ) == 3.0
+    assert u2_start.sim_time - u2_entry.sim_time == 3.0
 
     # Strict original t=4 ordering.
     expected_t4 = [
@@ -468,13 +407,7 @@ def test_a_only_completion_release_before_same_time_arrivals():
         f"Raw t=4 log:\n{raw_t4_log}"
     )
 
-    assert_cleanup(
-        env,
-        station,
-        log,
-        patients,
-        end_time=16.0,
-    )
+    assert_cleanup(env, station, log, patients, end_time=16.0)
 
 
 def test_a_only_service_end_release_and_departure_commit_boundaries():
@@ -484,15 +417,9 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
 
     station = AOnlyCoordinatedStation(env)
 
-    log = EventLog(
-        run_id="A_ONLY_COMMIT_BOUNDARY"
-    )
+    log = EventLog(run_id='A_ONLY_COMMIT_BOUNDARY')
 
-    patient = PatientAgent(
-        patient_id="u1",
-        patient_rank=1,
-        package=A_ONLY,
-    )
+    patient = PatientAgent(patient_id='u1', patient_rank=1, package=A_ONLY)
 
     # Phase 3 travel was already completed.
     patient.location = "A"
@@ -515,21 +442,14 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
 
     env.run(until=4.0)
     assert env.now == 4.0
-
-    # -----------------------------------------
     # Phase 0: SERVICE_END
-    # -----------------------------------------
     due = station.close_services(log)
 
     assert len(due) == 1
     assert due[0].patient is patient
     assert due[0].visit_id == visit_id
 
-    service_end = only(
-        log.records,
-        "u1",
-        "SERVICE_END",
-    )
+    service_end = only(log.records, 'u1', 'SERVICE_END')
 
     assert service_end.phase == 0
 
@@ -545,15 +465,8 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
     assert len(station.resource.users) == 1
     assert station.release_count == 0
 
-    assert not [
-        record
-        for record in log.records
-        if record.event_type == "DEPARTURE"
-    ]
-
-    # -----------------------------------------
+    assert not [record for record in log.records if record.event_type == 'DEPARTURE']
     # Phase 1: RESOURCE_RELEASE
-    # -----------------------------------------
     released = station.release_services(due, log)
 
     assert released == [patient]
@@ -568,43 +481,21 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
     assert station.active == {}
 
     assert station.release_count == 1
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
-    release = only(
-        log.records,
-        "u1",
-        "RESOURCE_RELEASE",
-    )
+    release = only(log.records, 'u1', 'RESOURCE_RELEASE')
 
     assert release.phase == 1
     assert release.prior_state == PatientState.IN_SERVICE
     assert release.new_state == PatientState.FINISHED
 
-    assert not [
-        record
-        for record in log.records
-        if record.event_type == "DEPARTURE"
-    ]
-
-    # -----------------------------------------
+    assert not [record for record in log.records if record.event_type == 'DEPARTURE']
     # Phase 3: DEPARTURE
-    # -----------------------------------------
-    coordinator = AOnlyCoordinator(
-        env=env,
-        station=station,
-        event_log=log,
-        arrivals=[],
-    )
+    coordinator = AOnlyCoordinator(env=env, station=station, event_log=log, arrivals=[])
 
     coordinator.commit_departures(released)
 
-    departures = [
-        record
-        for record in log.records
-        if record.event_type == "DEPARTURE"
-    ]
+    departures = [record for record in log.records if record.event_type == 'DEPARTURE']
 
     assert len(departures) == 1
 
@@ -647,23 +538,11 @@ def test_phase3_zero_travel_commits_before_phase4_queue_entry(
         assert station.resource.queue == []
         assert station.active == {}
 
-        start = only(
-            event_log.records,
-            patient.patient_id,
-            "TRAVEL_START",
-        )
+        start = only(event_log.records, patient.patient_id, 'TRAVEL_START')
 
-        end = only(
-            event_log.records,
-            patient.patient_id,
-            "TRAVEL_END",
-        )
+        end = only(event_log.records, patient.patient_id, 'TRAVEL_END')
 
-        assert (
-            start.sim_time
-            == end.sim_time
-            == station.env.now
-        )
+        assert start.sim_time == end.sim_time == station.env.now
 
         assert start.phase == 3
         assert end.phase == 3
@@ -676,9 +555,7 @@ def test_phase3_zero_travel_commits_before_phase4_queue_entry(
             and record.event_type == "QUEUE_ENTRY"
         ]
 
-        observed.append(
-            (patient.patient_id, station.env.now)
-        )
+        observed.append((patient.patient_id, station.env.now))
 
         return original_enqueue(
             station,
@@ -686,21 +563,11 @@ def test_phase3_zero_travel_commits_before_phase4_queue_entry(
             event_log,
         )
 
-    monkeypatch.setattr(
-        AOnlyCoordinatedStation,
-        "enqueue",
-        inspect_phase4_entry,
-    )
+    monkeypatch.setattr(AOnlyCoordinatedStation, 'enqueue', inspect_phase4_entry)
 
-    env, station, log, patients = run_scenario([
-        ("u2", 2, 0.0),
-        ("u1", 1, 0.0),
-    ])
+    env, station, log, patients = run_scenario([('u2', 2, 0.0), ('u1', 1, 0.0)])
 
-    assert observed == [
-        ("u1", 0.0),
-        ("u2", 0.0),
-    ]
+    assert observed == [('u1', 0.0), ('u2', 0.0)]
 
     last_travel_end = max(
         record.sequence_id
@@ -718,13 +585,7 @@ def test_phase3_zero_travel_commits_before_phase4_queue_entry(
 
     assert last_travel_end < first_queue_entry
 
-    assert_cleanup(
-        env,
-        station,
-        log,
-        patients,
-        end_time=8.0,
-    )
+    assert_cleanup(env, station, log, patients, end_time=8.0)
 
 
 def test_c_two_services_complete_together_before_any_release_or_next_start():
@@ -745,71 +606,31 @@ def test_c_two_services_complete_together_before_any_release_or_next_start():
     assert station.resource.capacity == 2
     assert station.config.service_duration == 5.0
 
-    expected_intervals = {
-        "u1": (0.0, 5.0),
-        "u2": (0.0, 5.0),
-        "u3": (5.0, 10.0),
-    }
+    expected_intervals = {'u1': (0.0, 5.0), 'u2': (0.0, 5.0), 'u3': (5.0, 10.0)}
 
-    expected_waits = {
-        "u1": 0.0,
-        "u2": 0.0,
-        "u3": 5.0,
-    }
+    expected_waits = {'u1': 0.0, 'u2': 0.0, 'u3': 5.0}
 
-    expected_departures = {
-        "u1": 5.0,
-        "u2": 5.0,
-        "u3": 10.0,
-    }
+    expected_departures = {'u1': 5.0, 'u2': 5.0, 'u3': 10.0}
 
     for patient_id in ("u1", "u2", "u3"):
-        entry = only(
-            records,
-            patient_id,
-            "QUEUE_ENTRY",
-        )
+        entry = only(records, patient_id, 'QUEUE_ENTRY')
 
-        start = only(
-            records,
-            patient_id,
-            "SERVICE_START",
-        )
+        start = only(records, patient_id, 'SERVICE_START')
 
-        end = only(
-            records,
-            patient_id,
-            "SERVICE_END",
-        )
+        end = only(records, patient_id, 'SERVICE_END')
 
-        departure = only(
-            records,
-            patient_id,
-            "DEPARTURE",
-        )
+        departure = only(records, patient_id, 'DEPARTURE')
 
         assert entry.station_id == "C"
         assert entry.sim_time == 0.0
 
-        assert (
-            start.sim_time,
-            end.sim_time,
-        ) == expected_intervals[patient_id]
+        assert (start.sim_time, end.sim_time) == expected_intervals[patient_id]
 
-        assert (
-            start.sim_time - entry.sim_time
-        ) == expected_waits[patient_id]
+        assert start.sim_time - entry.sim_time == expected_waits[patient_id]
 
-        assert (
-            departure.sim_time
-            == expected_departures[patient_id]
-        )
+        assert departure.sim_time == expected_departures[patient_id]
 
-        assert (
-            entry.visit_id
-            == start.visit_id
-            == end.visit_id
-        )
+        assert entry.visit_id == start.visit_id == end.visit_id
 
     assert [
         (record.patient_id, record.sim_time)
@@ -901,49 +722,13 @@ def test_c_two_services_complete_together_before_any_release_or_next_start():
     assert station.peak_resource_count == 2
     assert station.release_count == 3
 
-    assert_cleanup(
-        env,
-        station,
-        log,
-        patients,
-        end_time=10.0,
-        station_id="C",
-    )
+    assert_cleanup(env, station, log, patients, end_time=10.0, station_id='C')
 
 
 def test_register_positive_travel_is_a_plan_only():
     """Register A -> B at t=4 without changing patient state."""
 
-    env = simpy.Environment()
-    env.run(until=4.0)
-
-    assert env.now == 4.0
-
-    station = AOnlyCoordinatedStation(
-        env,
-        station_id="B",
-    )
-
-    log = EventLog(
-        run_id="P1_REGISTER_TRAVEL"
-    )
-
-    coordinator = AOnlyCoordinator(
-        env=env,
-        station=station,
-        event_log=log,
-        arrivals=[],
-    )
-
-    patient = PatientAgent(
-        patient_id="u1",
-        patient_rank=1,
-        package=P1_CONFIG,
-    )
-
-    patient.location = "A"
-    patient.state = PatientState.DECIDING
-    patient.completed_tests.add("A")
+    env, station, log, coordinator, patient = prepare_b_travel(run_id='P1_REGISTER_TRAVEL')
 
     travel = ScheduledTravel(
         patient=patient,
@@ -971,12 +756,7 @@ def test_register_positive_travel_is_a_plan_only():
 
     assert log.records == []
 
-    assert station.waiting == []
-    assert station.active == {}
-
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
     assert station.release_count == 0
     assert station.peak_resource_count == 0
@@ -998,12 +778,7 @@ def test_register_positive_travel_is_a_plan_only():
     assert patient.active_station_id is None
 
     assert log.records == []
-    assert station.waiting == []
-    assert station.active == {}
-
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
 
 def test_commit_due_travels_at_boundary_without_queueing():
@@ -1014,36 +789,9 @@ def test_commit_due_travels_at_boundary_without_queueing():
     until a future Phase 4 QUEUE_ENTRY.
     """
 
-    env = simpy.Environment()
-    env.run(until=4.0)
-
-    assert env.now == 4.0
-
-    station = AOnlyCoordinatedStation(
-        env,
-        station_id="B",
+    env, station, log, coordinator, patient = prepare_b_travel(
+        run_id='P1_TRAVEL_COMPLETION_BOUNDARY'
     )
-
-    log = EventLog(
-        run_id="P1_TRAVEL_COMPLETION_BOUNDARY"
-    )
-
-    coordinator = AOnlyCoordinator(
-        env=env,
-        station=station,
-        event_log=log,
-        arrivals=[],
-    )
-
-    patient = PatientAgent(
-        patient_id="u1",
-        patient_rank=1,
-        package=P1_CONFIG,
-    )
-
-    patient.location = "A"
-    patient.state = PatientState.DECIDING
-    patient.completed_tests.add("A")
 
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
@@ -1072,11 +820,7 @@ def test_commit_due_travels_at_boundary_without_queueing():
         phase=3,
     )
 
-    travel_start = only(
-        log.records,
-        "u1",
-        "TRAVEL_START",
-    )
+    travel_start = only(log.records, 'u1', 'TRAVEL_START')
 
     assert travel_start.sim_time == 4.0
     assert travel_start.phase == 3
@@ -1086,11 +830,7 @@ def test_commit_due_travels_at_boundary_without_queueing():
     assert patient.location == "A"
     assert patient.completed_tests == {"A"}
 
-    assert not [
-        record
-        for record in log.records
-        if record.event_type == "TRAVEL_END"
-    ]
+    assert not [record for record in log.records if record.event_type == 'TRAVEL_END']
 
     # t=4.5: not due.
     env.run(until=4.5)
@@ -1109,16 +849,9 @@ def test_commit_due_travels_at_boundary_without_queueing():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    assert [
-        record.event_type
-        for record in log.records
-    ] == [
-        "TRAVEL_START",
-    ]
+    assert [record.event_type for record in log.records] == ['TRAVEL_START']
 
-    assert station.waiting == []
-    assert station.active == {}
-    assert station.resource.count == 0
+    assert_empty_station(station)
 
     # t=5: exactly due.
     env.run(until=5.0)
@@ -1137,11 +870,7 @@ def test_commit_due_travels_at_boundary_without_queueing():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    travel_ends = [
-        record
-        for record in log.records
-        if record.event_type == "TRAVEL_END"
-    ]
+    travel_ends = [record for record in log.records if record.event_type == 'TRAVEL_END']
 
     assert len(travel_ends) == 1
 
@@ -1157,20 +886,9 @@ def test_commit_due_travels_at_boundary_without_queueing():
 
     assert travel_start.sequence_id < travel_end.sequence_id
 
-    assert [
-        record.event_type
-        for record in log.records
-    ] == [
-        "TRAVEL_START",
-        "TRAVEL_END",
-    ]
+    assert [record.event_type for record in log.records] == ['TRAVEL_START', 'TRAVEL_END']
 
-    assert station.waiting == []
-    assert station.active == {}
-
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
     assert station.release_count == 0
     assert station.peak_resource_count == 0
@@ -1181,11 +899,7 @@ def test_commit_due_travels_at_boundary_without_queueing():
     assert completed_again == []
     assert coordinator.pending_travels == []
 
-    assert len([
-        record
-        for record in log.records
-        if record.event_type == "TRAVEL_END"
-    ]) == 1
+    assert len([record for record in log.records if record.event_type == 'TRAVEL_END']) == 1
 
     assert patient.location == "B"
     assert patient.state == PatientState.TRAVELLING
@@ -1205,12 +919,7 @@ def test_commit_due_travels_at_boundary_without_queueing():
         )
     ]
 
-    assert station.waiting == []
-    assert station.active == {}
-
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
     assert env.now == 5.0
 
@@ -1224,36 +933,9 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
     This is not the full coordinated T01.
     """
 
-    env = simpy.Environment()
-
-    env.run(until=4.0)
-    assert env.now == 4.0
-
-    station = AOnlyCoordinatedStation(
-        env,
-        station_id="B",
+    env, station, log, coordinator, patient = prepare_b_travel(
+        run_id='P1_B_REMAINING_INTEGRATION'
     )
-
-    log = EventLog(
-        run_id="P1_B_REMAINING_INTEGRATION"
-    )
-
-    coordinator = AOnlyCoordinator(
-        env=env,
-        station=station,
-        event_log=log,
-        arrivals=[],
-    )
-
-    patient = PatientAgent(
-        patient_id="u1",
-        patient_rank=1,
-        package=P1_CONFIG,
-    )
-
-    patient.location = "A"
-    patient.state = PatientState.DECIDING
-    patient.completed_tests.add("A")
 
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
@@ -1286,12 +968,7 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
     assert patient.state == PatientState.TRAVELLING
     assert patient.completed_tests == {"A"}
 
-    assert [
-        record.event_type
-        for record in log.records
-    ] == [
-        "TRAVEL_START",
-    ]
+    assert [record.event_type for record in log.records] == ['TRAVEL_START']
 
     env.process(coordinator.run())
 
@@ -1308,22 +985,12 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    assert station.waiting == []
-    assert station.active == {}
-
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
     assert station.peak_resource_count == 0
     assert station.release_count == 0
 
-    assert [
-        record.event_type
-        for record in log.records
-    ] == [
-        "TRAVEL_START",
-    ]
+    assert [record.event_type for record in log.records] == ['TRAVEL_START']
 
     # Drain t=5 and t=8.
     env.run()
@@ -1391,41 +1058,17 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
         )
     ]
 
-    travel_end = only(
-        log.records,
-        "u1",
-        "TRAVEL_END",
-    )
+    travel_end = only(log.records, 'u1', 'TRAVEL_END')
 
-    queue_entry = only(
-        log.records,
-        "u1",
-        "QUEUE_ENTRY",
-    )
+    queue_entry = only(log.records, 'u1', 'QUEUE_ENTRY')
 
-    service_start = only(
-        log.records,
-        "u1",
-        "SERVICE_START",
-    )
+    service_start = only(log.records, 'u1', 'SERVICE_START')
 
-    service_end = only(
-        log.records,
-        "u1",
-        "SERVICE_END",
-    )
+    service_end = only(log.records, 'u1', 'SERVICE_END')
 
-    resource_release = only(
-        log.records,
-        "u1",
-        "RESOURCE_RELEASE",
-    )
+    resource_release = only(log.records, 'u1', 'RESOURCE_RELEASE')
 
-    departure = only(
-        log.records,
-        "u1",
-        "DEPARTURE",
-    )
+    departure = only(log.records, 'u1', 'DEPARTURE')
 
     assert (
         travel_end.sequence_id
@@ -1440,15 +1083,9 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
     assert service_start.sim_time == 5.0
     assert service_end.sim_time == 8.0
 
-    assert (
-        service_start.sim_time
-        - queue_entry.sim_time
-    ) == 0.0
+    assert service_start.sim_time - queue_entry.sim_time == 0.0
 
-    assert (
-        service_end.sim_time
-        - service_start.sim_time
-    ) == 3.0
+    assert service_end.sim_time - service_start.sim_time == 3.0
 
     assert (
         queue_entry.visit_id
@@ -1483,16 +1120,13 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
     assert coordinator.pending == []
     assert coordinator.pending_travels == []
 
-    assert station.waiting == []
-    assert station.active == {}
+    assert_empty_station(station)
 
     assert station.station_id == "B"
     assert station.resource.capacity == 1
     assert station.config.service_duration == 3.0
 
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
     assert station.peak_resource_count == 1
     assert station.release_count == 1
@@ -1516,49 +1150,12 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
         u2: B service [8, 11), departure at 11
     """
 
-    env = simpy.Environment()
-
-    # -----------------------------------------
-    # Prepare t=4
-    # -----------------------------------------
-    env.run(until=4.0)
-    assert env.now == 4.0
-
-    station = AOnlyCoordinatedStation(
-        env,
-        station_id="B",
-    )
-
-    log = EventLog(
-        run_id="B_MIXED_TRAVEL_SOURCES"
-    )
-
-    u1 = PatientAgent(
-        patient_id="u1",
-        patient_rank=1,
-        package=B_ONLY,
-    )
-
-    u2 = PatientAgent(
+    u1 = PatientAgent(patient_id="u1", patient_rank=1, package=B_ONLY)
+    env, station, log, coordinator, u2 = prepare_b_travel(
         patient_id="u2",
         patient_rank=2,
-        package=P1_CONFIG,
-    )
-
-    u2.location = "A"
-    u2.state = PatientState.DECIDING
-    u2.completed_tests.add("A")
-
-    coordinator = AOnlyCoordinator(
-        env=env,
-        station=station,
-        event_log=log,
-        arrivals=[
-            ScheduledArrival(
-                at=5.0,
-                patient=u1,
-            ),
-        ],
+        arrivals=[ScheduledArrival(at=5.0, patient=u1)],
+        run_id="B_MIXED_TRAVEL_SOURCES",
     )
 
     assert coordinator.pending_travels == []
@@ -1571,10 +1168,7 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
     assert u2.location == "A"
     assert u2.state == PatientState.DECIDING
     assert u2.completed_tests == {"A"}
-
-    # -----------------------------------------
     # t=4: Register u2 A -> B travel [4, 5)
-    # -----------------------------------------
     travel = ScheduledTravel(
         patient=u2,
         origin="A",
@@ -1607,9 +1201,7 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
     assert u2.active_visit_id is None
     assert u2.active_station_id is None
 
-    assert station.waiting == []
-    assert station.active == {}
-    assert station.resource.count == 0
+    assert_empty_station(station)
 
     assert [
         (
@@ -1624,10 +1216,7 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
     ]
 
     env.process(coordinator.run())
-
-    # -----------------------------------------
     # t=4.5: No B queue entry yet
-    # -----------------------------------------
     env.run(until=4.5)
 
     assert env.now == 4.5
@@ -1643,25 +1232,14 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
     assert u2.state == PatientState.TRAVELLING
     assert u2.completed_tests == {"A"}
 
-    assert station.waiting == []
-    assert station.active == {}
-
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
-
-    # -----------------------------------------
+    assert_empty_station(station)
     # Drain t=5, t=8 and t=11
-    # -----------------------------------------
     env.run()
 
     assert env.now == 11.0
 
     records = log.records
-
-    # -----------------------------------------
     # 1. Both TRAVEL_END events before queue entry
-    # -----------------------------------------
     travel_ends_t5 = [
         record
         for record in records
@@ -1679,20 +1257,11 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
     assert len(travel_ends_t5) == 2
     assert len(queue_entries_t5) == 2
 
-    assert {
-        record.patient_id
-        for record in travel_ends_t5
-    } == {"u1", "u2"}
+    assert {record.patient_id for record in travel_ends_t5} == {'u1', 'u2'}
 
-    assert all(
-        record.phase == 3
-        for record in travel_ends_t5
-    )
+    assert all((record.phase == 3 for record in travel_ends_t5))
 
-    assert all(
-        record.phase == 4
-        for record in queue_entries_t5
-    )
+    assert all((record.phase == 4 for record in queue_entries_t5))
 
     assert (
         max(
@@ -1705,10 +1274,7 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
             for record in queue_entries_t5
         )
     )
-
-    # -----------------------------------------
     # 2. Strict raw QUEUE_ENTRY order: u1, u2
-    # -----------------------------------------
     actual_queue_order = [
         (
             record.patient_id,
@@ -1720,10 +1286,7 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
         if record.event_type == "QUEUE_ENTRY"
     ]
 
-    expected_queue_order = [
-        ("u1", 5.0, 4, "B"),
-        ("u2", 5.0, 4, "B"),
-    ]
+    expected_queue_order = [('u1', 5.0, 4, 'B'), ('u2', 5.0, 4, 'B')]
 
     assert actual_queue_order == expected_queue_order
 
@@ -1734,16 +1297,8 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
             if record.patient_id == patient_id
             and record.event_type == "QUEUE_ENTRY"
         ]) == 1
-
-    # -----------------------------------------
     # 3. Strict t=5 relevant event order
-    # -----------------------------------------
-    relevant_types = {
-        "ARRIVAL",
-        "TRAVEL_END",
-        "QUEUE_ENTRY",
-        "SERVICE_START",
-    }
+    relevant_types = {'ARRIVAL', 'TRAVEL_END', 'QUEUE_ENTRY', 'SERVICE_START'}
 
     actual_t5_relevant = [
         (
@@ -1781,71 +1336,32 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
         f"Actual: {actual_t5_relevant!r}\n"
         f"Raw t=5 log:\n{raw_t5_log}"
     )
-
-    # -----------------------------------------
     # 4. Service intervals, waits and departures
-    # -----------------------------------------
-    expected_intervals = {
-        "u1": (5.0, 8.0),
-        "u2": (8.0, 11.0),
-    }
+    expected_intervals = {'u1': (5.0, 8.0), 'u2': (8.0, 11.0)}
 
-    expected_waits = {
-        "u1": 0.0,
-        "u2": 3.0,
-    }
+    expected_waits = {'u1': 0.0, 'u2': 3.0}
 
-    expected_departures = {
-        "u1": 8.0,
-        "u2": 11.0,
-    }
+    expected_departures = {'u1': 8.0, 'u2': 11.0}
 
     for patient_id in ("u1", "u2"):
-        entry = only(
-            records,
-            patient_id,
-            "QUEUE_ENTRY",
-        )
+        entry = only(records, patient_id, 'QUEUE_ENTRY')
 
-        service_start = only(
-            records,
-            patient_id,
-            "SERVICE_START",
-        )
+        service_start = only(records, patient_id, 'SERVICE_START')
 
-        service_end = only(
-            records,
-            patient_id,
-            "SERVICE_END",
-        )
+        service_end = only(records, patient_id, 'SERVICE_END')
 
-        departure = only(
-            records,
-            patient_id,
-            "DEPARTURE",
-        )
+        departure = only(records, patient_id, 'DEPARTURE')
 
         assert entry.sim_time == 5.0
         assert entry.station_id == "B"
 
-        assert (
-            service_start.sim_time,
-            service_end.sim_time,
-        ) == expected_intervals[patient_id]
+        assert (service_start.sim_time, service_end.sim_time) == expected_intervals[patient_id]
 
-        assert (
-            service_start.sim_time - entry.sim_time
-        ) == expected_waits[patient_id]
+        assert service_start.sim_time - entry.sim_time == expected_waits[patient_id]
 
-        assert (
-            departure.sim_time
-            == expected_departures[patient_id]
-        )
+        assert departure.sim_time == expected_departures[patient_id]
 
-        assert (
-            service_end.sim_time
-            - service_start.sim_time
-        ) == 3.0
+        assert service_end.sim_time - service_start.sim_time == 3.0
 
         assert (
             entry.sequence_id
@@ -1854,11 +1370,7 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
             < departure.sequence_id
         )
 
-        assert (
-            entry.visit_id
-            == service_start.visit_id
-            == service_end.visit_id
-        )
+        assert entry.visit_id == service_start.visit_id == service_end.visit_id
 
     assert [
         (record.patient_id, record.sim_time)
@@ -1868,15 +1380,8 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
         ("u1", 5.0),
         ("u2", 8.0),
     ]
-
-    # -----------------------------------------
     # 5. u2 must not repeat ARRIVAL or Routing
-    # -----------------------------------------
-    u2_events = [
-        record
-        for record in records
-        if record.patient_id == "u2"
-    ]
+    u2_events = [record for record in records if record.patient_id == 'u2']
 
     assert not [
         record
@@ -1889,23 +1394,11 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
         )
     ]
 
-    assert len([
-        record
-        for record in u2_events
-        if record.event_type == "TRAVEL_START"
-    ]) == 1
+    assert len([record for record in u2_events if record.event_type == 'TRAVEL_START']) == 1
 
-    u2_travel_start = only(
-        records,
-        "u2",
-        "TRAVEL_START",
-    )
+    u2_travel_start = only(records, 'u2', 'TRAVEL_START')
 
-    u2_travel_end = only(
-        records,
-        "u2",
-        "TRAVEL_END",
-    )
+    u2_travel_end = only(records, 'u2', 'TRAVEL_END')
 
     assert u2_travel_start.sim_time == 4.0
     assert u2_travel_end.sim_time == 5.0
@@ -1913,45 +1406,18 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
     assert u2_travel_start.phase == 3
     assert u2_travel_end.phase == 3
 
-    assert (
-        u2_travel_start.sequence_id
-        < u2_travel_end.sequence_id
-    )
+    assert u2_travel_start.sequence_id < u2_travel_end.sequence_id
 
-    u1_arrival = only(
-        records,
-        "u1",
-        "ARRIVAL",
-    )
+    u1_arrival = only(records, 'u1', 'ARRIVAL')
 
-    u1_travel_start = only(
-        records,
-        "u1",
-        "TRAVEL_START",
-    )
+    u1_travel_start = only(records, 'u1', 'TRAVEL_START')
 
-    u1_travel_end = only(
-        records,
-        "u1",
-        "TRAVEL_END",
-    )
+    u1_travel_end = only(records, 'u1', 'TRAVEL_END')
 
-    assert (
-        u1_arrival.sim_time
-        == u1_travel_start.sim_time
-        == u1_travel_end.sim_time
-        == 5.0
-    )
+    assert u1_arrival.sim_time == u1_travel_start.sim_time == u1_travel_end.sim_time == 5.0
 
-    assert (
-        u1_arrival.sequence_id
-        < u1_travel_start.sequence_id
-        < u1_travel_end.sequence_id
-    )
-
-    # -----------------------------------------
+    assert u1_arrival.sequence_id < u1_travel_start.sequence_id < u1_travel_end.sequence_id
     # 6. Final states
-    # -----------------------------------------
     assert u1.state == PatientState.FINISHED
     assert u1.location == "B"
     assert u1.completed_tests == {"B"}
@@ -1995,40 +1461,25 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
             )
         ]
 
-        assert actual_states == expected_states, (
-            patient_id,
-            actual_states,
-        )
-
-    # -----------------------------------------
+        assert actual_states == expected_states, (patient_id, actual_states)
     # 7. Cleanup
-    # -----------------------------------------
     assert coordinator.pending == []
     assert coordinator.pending_travels == []
 
-    assert station.waiting == []
-    assert station.active == {}
+    assert_empty_station(station)
 
     assert station.station_id == "B"
     assert station.resource.capacity == 1
     assert station.config.service_duration == 3.0
 
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
     assert station.peak_resource_count == 1
     assert station.release_count == 2
-
-    # -----------------------------------------
     # 8. Phase and sequence contracts
-    # -----------------------------------------
     assert_phase_contract(records)
 
-    assert [
-        record.sequence_id
-        for record in records
-    ] == list(range(1, len(records) + 1))
+    assert [record.sequence_id for record in records] == list(range(1, len(records) + 1))
 
 
 def test_station_releases_unfinished_p1_after_a_without_departure():
@@ -2041,20 +1492,11 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
     env = simpy.Environment()
 
     # Construct only Station A.
-    station = AOnlyCoordinatedStation(
-        env,
-        station_id="A",
-    )
+    station = AOnlyCoordinatedStation(env, station_id='A')
 
-    log = EventLog(
-        run_id="P1_A_UNFINISHED_RELEASE"
-    )
+    log = EventLog(run_id='P1_A_UNFINISHED_RELEASE')
 
-    patient = PatientAgent(
-        patient_id="u1",
-        patient_rank=1,
-        package=P1_CONFIG,
-    )
+    patient = PatientAgent(patient_id='u1', patient_rank=1, package=P1_CONFIG)
 
     # Phase 3 ENTRY -> A travel has already completed.
     patient.location = "A"
@@ -2064,10 +1506,7 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
 
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
-
-    # -----------------------------------------
     # t=0: Phase 4 and Phase 5
-    # -----------------------------------------
     station.enqueue(patient, log)
     station.start_available(log)
 
@@ -2085,28 +1524,18 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
     assert station.resource.count == 1
     assert len(station.resource.users) == 1
     assert station.release_count == 0
-
-    # -----------------------------------------
     # Advance to t=4
-    # -----------------------------------------
     env.run(until=4.0)
 
     assert env.now == 4.0
-
-    # -----------------------------------------
     # Phase 0: Record SERVICE_END only
-    # -----------------------------------------
     due = station.close_services(log)
 
     assert len(due) == 1
     assert due[0].patient is patient
     assert due[0].visit_id == visit_id
 
-    service_end = only(
-        log.records,
-        "u1",
-        "SERVICE_END",
-    )
+    service_end = only(log.records, 'u1', 'SERVICE_END')
 
     assert service_end.sim_time == 4.0
     assert service_end.phase == 0
@@ -2122,10 +1551,7 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
     assert station.active[visit_id] is due[0]
     assert station.resource.count == 1
     assert station.release_count == 0
-
-    # -----------------------------------------
     # Phase 1: Release unfinished P1
-    # -----------------------------------------
     released = station.release_services(due, log)
 
     # The original PatientAgent object is returned.
@@ -2142,24 +1568,14 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
     assert patient.active_station_id is None
 
     # Domain queue and active visits are empty.
-    assert station.waiting == []
-    assert station.active == {}
-
-    # Native Resource released exactly once.
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
     assert station.release_count == 1
     assert station.peak_resource_count == 1
 
     # RESOURCE_RELEASE commits NEEDS_ROUTING,
     # rather than incorrectly committing FINISHED.
-    release = only(
-        log.records,
-        "u1",
-        "RESOURCE_RELEASE",
-    )
+    release = only(log.records, 'u1', 'RESOURCE_RELEASE')
 
     assert release.sim_time == 4.0
     assert release.phase == 1
@@ -2170,17 +1586,10 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
 
     assert release.visit_id == visit_id
 
-    assert (
-        service_end.sequence_id
-        < release.sequence_id
-    )
+    assert service_end.sequence_id < release.sequence_id
 
     # No Departure is allowed for an unfinished package.
-    assert not [
-        record
-        for record in log.records
-        if record.event_type == "DEPARTURE"
-    ]
+    assert not [record for record in log.records if record.event_type == 'DEPARTURE']
 
     # No B admission or service has taken place.
     assert not [
@@ -2197,28 +1606,17 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
 
     # Pure Fixed Route recommendation is now B.
     # This does not start travel or modify patient state.
-    recommended = recommend_fixed_route(
-        patient.package,
-        patient.completed_tests,
-    )
+    recommended = recommend_fixed_route(patient.package, patient.completed_tests)
 
     assert recommended == "B"
 
     assert patient.state == PatientState.NEEDS_ROUTING
     assert patient.location == "A"
     assert patient.completed_tests == {"A"}
-
-    # -----------------------------------------
     # Coordinator boundary: explicit rejection
-    # -----------------------------------------
     # Constructing a Coordinator is allowed here,
     # but its run() method is NOT started.
-    coordinator = AOnlyCoordinator(
-        env=env,
-        station=station,
-        event_log=log,
-        arrivals=[],
-    )
+    coordinator = AOnlyCoordinator(env=env, station=station, event_log=log, arrivals=[])
 
     with pytest.raises(
         NotImplementedError,
@@ -2227,11 +1625,7 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
         coordinator.commit_departures(released)
 
     # The rejection must not create Departure.
-    assert not [
-        record
-        for record in log.records
-        if record.event_type == "DEPARTURE"
-    ]
+    assert not [record for record in log.records if record.event_type == 'DEPARTURE']
 
     # The rejected continuation does not change
     # the already committed Station release.
@@ -2244,12 +1638,7 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
 
     assert station.release_count == 1
 
-    assert station.waiting == []
-    assert station.active == {}
-
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
+    assert_empty_station(station)
 
     # This is a Station release boundary test.
     # Do not call assert_cleanup(), which requires FINISHED.
@@ -2260,39 +1649,6 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
         for record in log.records
     ] == list(range(1, len(log.records) + 1))
 
-
-def prepare_b_travel(
-    *, patient_id="u1", patient_rank=1, arrivals=(), run_id="B_TRAVEL"
-):
-    """Prepare t=4 with B and a P1 patient who has completed A."""
-    env = simpy.Environment()
-    env.run(until=4.0)
-    assert env.now == 4.0
-    station = AOnlyCoordinatedStation(env, station_id="B")
-    log = EventLog(run_id=run_id)
-    coordinator = AOnlyCoordinator(env, station, log, arrivals)
-    patient = PatientAgent(patient_id, patient_rank, P1_CONFIG)
-    patient.location = "A"
-    patient.state = PatientState.DECIDING
-    patient.completed_tests.add("A")
-    return env, station, log, coordinator, patient
-
-def assert_empty_station(station):
-    """Check queue/resource cleanup without requiring patient completion."""
-    assert station.waiting == []
-    assert station.active == {}
-    assert station.resource.count == 0
-    assert station.resource.users == []
-    assert station.resource.queue == []
-
-def patient_snapshot(patient):
-    return (
-        patient.state,
-        patient.location,
-        frozenset(patient.completed_tests),
-        patient.active_visit_id,
-        patient.active_station_id,
-    )
 
 @pytest.mark.parametrize("arrival_time", [5.0, 6.0])
 def test_travel_rejects_a_different_patient_with_an_arrival_id(arrival_time):
@@ -2320,6 +1676,7 @@ def test_travel_rejects_a_different_patient_with_an_arrival_id(arrival_time):
     assert_empty_station(station)
     assert station.release_count == 0
     assert station.peak_resource_count == 0
+
 
 @pytest.mark.parametrize("stage", ["after_travel", "after_service"])
 def test_patient_id_remains_owned_after_travel_or_service(stage):
@@ -2379,6 +1736,7 @@ def test_patient_id_remains_owned_after_travel_or_service(stage):
     assert (station.release_count, station.peak_resource_count) == before_counts
     assert_empty_station(station)
     assert_phase_contract(log.records)
+
 
 @pytest.mark.parametrize("invalid_batch", ["foreign_visit", "duplicate_visit"])
 def test_invalid_release_batch_preserves_all_active_visits(invalid_batch):

@@ -74,15 +74,11 @@ MODEL0_TRAVEL_TIMES: dict[tuple[str, str], float] = {
     ("B", "B"): 0.0,
     ("C", "C"): 0.0,
 
-    # Travel between A and B
+    # Inter-station travel
     ("A", "B"): 1.0,
     ("B", "A"): 1.0,
-
-    # Travel between B and C
     ("B", "C"): 1.0,
     ("C", "B"): 1.0,
-
-    # Travel between A and C
     ("A", "C"): 2.0,
     ("C", "A"): 2.0,
 }
@@ -122,28 +118,23 @@ def recommend_fixed_route(
     package: PackageConfig,
     completed_tests: set[str],
 ) -> str | None:
-    # 1. All required tests completed
     if package.required_tests.issubset(completed_tests):
         return None
 
-    # 2. Find the first unfinished station in fixed route
     next_station = None
-
     for station in package.fixed_route:
         if station not in completed_tests:
             next_station = station
             break
 
-    # 3. No next station despite unfinished required tests
     if next_station is None:
         raise ValueError(
             "Fixed route has no remaining station, "
             "but required tests are not all completed."
         )
 
-    # 4. Check hard-precedence eligibility
+    # Eligibility is independent of the fixed-route policy.
     eligible = eligible_stations(package, completed_tests)
-
     if next_station not in eligible:
         raise ValueError(
             f"Fixed route recommends station {next_station!r}, "
@@ -151,9 +142,7 @@ def recommend_fixed_route(
             f"Eligible stations: {sorted(eligible)}"
         )
 
-    # 5. Return the recommended station
     return next_station
-
 
 
 class StationAgent:
@@ -166,10 +155,7 @@ class StationAgent:
         self.env = env
         self.station_id = station_id
         self.config = config
-        self.resource = simpy.Resource(
-            env,
-            capacity=config.capacity,
-        )
+        self.resource = simpy.Resource(env, capacity=config.capacity)
 
     def serve(
         self,
@@ -177,7 +163,7 @@ class StationAgent:
         event_log: "EventLog",
         visit_id: str,
     ):
-        # 1. Validate before changing patient state
+        # Validate before changing visit ownership.
         if patient.location != self.station_id:
             raise ValueError(
                 f"Patient {patient.patient_id!r} is at "
@@ -186,9 +172,7 @@ class StationAgent:
             )
 
         if self.station_id not in MODEL0_STATIONS:
-            raise ValueError(
-                f"Unknown station: {self.station_id!r}"
-            )
+            raise ValueError(f"Unknown station: {self.station_id!r}")
 
         if self.station_id not in eligible_stations(
             patient.package,
@@ -208,14 +192,8 @@ class StationAgent:
                 f"already has an active visit."
             )
 
-        # Stable resource-request identifier
-        resource_token = (
-            f"{self.station_id}:"
-            f"{patient.patient_id}:"
-            f"{visit_id}"
-        )
+        resource_token = f"{self.station_id}:{patient.patient_id}:{visit_id}"
 
-        # 2. Activate visit and commit QUEUE_ENTRY
         patient.active_visit_id = visit_id
         patient.active_station_id = self.station_id
 
@@ -230,11 +208,10 @@ class StationAgent:
             resource_token_or_server_id=resource_token,
         )
 
-        # 3. Request capacity through native SimPy Resource
+        # The context manager owns resource release.
         with self.resource.request() as request:
             yield request
 
-            # 4. Commit SERVICE_START
             transition_patient_state(
                 patient=patient,
                 event_log=event_log,
@@ -246,12 +223,8 @@ class StationAgent:
                 resource_token_or_server_id=resource_token,
             )
 
-            # 5. Perform uninterrupted service
-            yield self.env.timeout(
-                self.config.service_duration
-            )
+            yield self.env.timeout(self.config.service_duration)
 
-            # 6. Record SERVICE_END
             event_log.record(
                 sim_time=self.env.now,
                 event_type="SERVICE_END",
@@ -263,28 +236,17 @@ class StationAgent:
                 resource_token_or_server_id=resource_token,
             )
 
-            # Mark this test as completed
-            patient.completed_tests.add(
-                self.station_id
-            )
+            patient.completed_tests.add(self.station_id)
 
-        # Resource automatically released exactly once
-        # when exiting the context manager.
-
-        # Clear active visit and station
+        # No yield separates completion, release and state commit.
         patient.active_visit_id = None
         patient.active_station_id = None
 
-        # 7. Determine the next patient state
-        if patient.package.required_tests.issubset(
-            patient.completed_tests
-        ):
+        if patient.package.required_tests.issubset(patient.completed_tests):
             new_state = PatientState.FINISHED
         else:
             new_state = PatientState.NEEDS_ROUTING
 
-        # Commit RESOURCE_RELEASE and next state
-        # No yield occurs between SERVICE_END and here
         transition_patient_state(
             patient=patient,
             event_log=event_log,
@@ -295,7 +257,6 @@ class StationAgent:
             visit_id=visit_id,
             resource_token_or_server_id=resource_token,
         )
-
 
 
 class EventLog:
@@ -319,7 +280,6 @@ class EventLog:
         resource_token_or_server_id: str | None = None,
         phase: int | None = None,
     ) -> EventRecord:
-        # 1. Create an immutable event record
         event = EventRecord(
             sim_time=sim_time,
             sequence_id=self._next_sequence_id,
@@ -336,13 +296,9 @@ class EventLog:
             phase=phase,
         )
 
-        # 2. Preserve actual recording order
+        # Preserve raw event order.
         self.records.append(event)
-
-        # 3. Increment sequence ID
         self._next_sequence_id += 1
-
-        # 4. Return the created record
         return event
 
 
@@ -360,13 +316,9 @@ def transition_patient_state(
     resource_token_or_server_id: str | None = None,
     phase: int | None = None,
 ) -> EventRecord:
-    # 1. Save the previous state
+    # Record the transition without yielding.
     prior_state = patient.state
-
-    # 2. Update the patient state
     patient.state = new_state
-
-    # 3. Immediately commit the event record
     event = event_log.record(
         sim_time=sim_time,
         event_type=event_type,
@@ -381,7 +333,6 @@ def transition_patient_state(
         phase=phase,
     )
 
-    # 4. Return the committed event
     return event
 
 
@@ -391,17 +342,11 @@ def travel_to_station(
     station_id: str,
     event_log: EventLog,
 ):
-    # 1. Validate destination before state changes
+    # Reject illegal destinations before changing state.
     if station_id not in MODEL0_STATIONS:
-        raise ValueError(
-            f"Unknown station: {station_id!r}"
-        )
+        raise ValueError(f"Unknown station: {station_id!r}")
 
-    eligible = eligible_stations(
-        patient.package,
-        patient.completed_tests,
-    )
-
+    eligible = eligible_stations(patient.package, patient.completed_tests)
     if station_id not in eligible:
         raise ValueError(
             f"Station {station_id!r} is not eligible "
@@ -409,12 +354,8 @@ def travel_to_station(
             f"Eligible stations: {sorted(eligible)}"
         )
 
-    # 2. Look up directed travel time
-    travel_duration = MODEL0_TRAVEL_TIMES[
-        (patient.location, station_id)
-    ]
+    travel_duration = MODEL0_TRAVEL_TIMES[(patient.location, station_id)]
 
-    # 3. Commit TRAVELLING and TRAVEL_START
     transition_patient_state(
         patient=patient,
         event_log=event_log,
@@ -424,13 +365,11 @@ def travel_to_station(
         station_id=station_id,
     )
 
-    # 4. Wait for travel, including zero duration
+    # Zero travel still yields in this native-process baseline.
     yield env.timeout(travel_duration)
-
-    # 5. Update location after travel completes
     patient.location = station_id
 
-    # 6. Record TRAVEL_END without changing state
+    # Queue entry commits WAITING after travel completion.
     event_log.record(
         sim_time=env.now,
         event_type="TRAVEL_END",
@@ -447,7 +386,6 @@ def patient_process(
     stations: dict[str, StationAgent],
     event_log: EventLog,
 ):
-    # 1. Record initial arrival
     event_log.record(
         sim_time=env.now,
         event_type="ARRIVAL",
@@ -456,7 +394,6 @@ def patient_process(
         new_state=PatientState.ARRIVED,
     )
 
-    # 2. Enter NEEDS_ROUTING
     transition_patient_state(
         patient=patient,
         event_log=event_log,
@@ -468,7 +405,6 @@ def patient_process(
     visit_number = 0
 
     while True:
-        # Enter DECIDING
         transition_patient_state(
             patient=patient,
             event_log=event_log,
@@ -477,7 +413,6 @@ def patient_process(
             new_state=PatientState.DECIDING,
         )
 
-        # 3. Obtain Fixed Route recommendation
         recommended_station = recommend_fixed_route(
             patient.package,
             patient.completed_tests,
@@ -488,7 +423,7 @@ def patient_process(
                 "No station was recommended for an unfinished patient."
             )
 
-        # B0 policy: chosen station equals recommendation
+        # B0 follows the legal recommendation.
         chosen_station = recommended_station
 
         event_log.record(
@@ -501,30 +436,17 @@ def patient_process(
             chosen_station=chosen_station,
         )
 
-        # 4. Wait until travel completes
         yield env.process(
-            travel_to_station(
-                env,
-                patient,
-                chosen_station,
-                event_log,
-            )
+            travel_to_station(env, patient, chosen_station, event_log)
         )
 
-        # 5. Generate a stable visit ID
         visit_number += 1
         visit_id = f"{patient.patient_id}:visit:{visit_number}"
 
-        # Wait until station service and release complete
         yield env.process(
-            stations[chosen_station].serve(
-                patient,
-                event_log,
-                visit_id,
-            )
+            stations[chosen_station].serve(patient, event_log, visit_id)
         )
 
-        # 6. Check the state after service
         if patient.state == PatientState.FINISHED:
             event_log.record(
                 sim_time=env.now,
@@ -540,5 +462,3 @@ def patient_process(
                 f"Unexpected patient state after service: "
                 f"{patient.state!r}"
             )
-
-        # NEEDS_ROUTING: continue to the next decision
