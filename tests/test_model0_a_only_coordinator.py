@@ -2272,3 +2272,454 @@ def test_start_next_travel_after_a_release_stops_at_t4():
         record.sequence_id
         for record in log.records
     ] == list(range(1, len(log.records) + 1))
+
+def test_p1_a_release_to_b_run_component_linkage():
+    """Connect A release to B Coordinator and drain the remaining P1 flow.
+
+    This is a component-linkage test, not a unified multi-station run.
+    A's Phase 0/1 are committed directly; B's Coordinator.run() handles
+    the registered A -> B travel and B service.
+
+    Expected:
+        t=4: A release, then DECIDING / ROUTE_DECISION / TRAVEL_START
+        t=5: TRAVEL_END, B QUEUE_ENTRY, B SERVICE_START
+        t=8: B SERVICE_END, RESOURCE_RELEASE, DEPARTURE
+    """
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(
+        env,
+        station_id="A",
+    )
+    station_b = AOnlyCoordinatedStation(
+        env,
+        station_id="B",
+    )
+
+    # Both stations share the same EventLog.
+    log = EventLog(
+        run_id="P1_A_TO_B_COMPONENT_LINK"
+    )
+
+    patient = PatientAgent(
+        patient_id="u1",
+        patient_rank=1,
+        package=P1_CONFIG,
+    )
+
+    # The initial ENTRY -> A travel is treated as already completed.
+    # The test begins with the patient at A, ready for Phase 4.
+    patient.location = "A"
+    patient.state = PatientState.TRAVELLING
+
+    assert patient.completed_tests == set()
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+
+    # --------------------------------------------------
+    # t=0: Queue entry and service start at A
+    # --------------------------------------------------
+    station_a.enqueue(patient, log)
+    station_a.start_available(log)
+
+    assert patient.state == PatientState.IN_SERVICE
+    assert patient.location == "A"
+
+    assert station_a.resource.count == 1
+    assert station_a.resource.capacity == 1
+
+    assert station_a.config.service_duration == 4.0
+
+    assert station_b.waiting == []
+    assert station_b.active == {}
+    assert station_b.resource.count == 0
+
+    # --------------------------------------------------
+    # t=4: Phase 0 and Phase 1 at A
+    # --------------------------------------------------
+    env.run(until=4.0)
+
+    assert env.now == 4.0
+
+    due = station_a.close_services(log)
+
+    assert len(due) == 1
+    assert due[0].patient is patient
+
+    released = station_a.release_services(due, log)
+
+    assert len(released) == 1
+    assert released[0] is patient
+
+    # A is complete; B is still required.
+    assert patient.state == PatientState.NEEDS_ROUTING
+    assert patient.location == "A"
+    assert patient.completed_tests == {"A"}
+
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+
+    assert_empty_station(station_a)
+
+    assert station_a.release_count == 1
+    assert station_a.peak_resource_count == 1
+
+    release_a = [
+        record
+        for record in log.records
+        if record.event_type == "RESOURCE_RELEASE"
+        and record.station_id == "A"
+    ]
+
+    assert len(release_a) == 1
+    assert release_a[0].sim_time == 4.0
+    assert release_a[0].phase == 1
+    assert release_a[0].prior_state == PatientState.IN_SERVICE
+    assert release_a[0].new_state == PatientState.NEEDS_ROUTING
+
+    # --------------------------------------------------
+    # t=4: Start the next travel through B Coordinator
+    # --------------------------------------------------
+    coordinator_b = AOnlyCoordinator(
+        env=env,
+        station=station_b,
+        event_log=log,
+        arrivals=[],
+    )
+
+    assert coordinator_b.pending == []
+    assert coordinator_b.pending_travels == []
+
+    travel = coordinator_b.start_next_travel(patient)
+
+    assert isinstance(travel, ScheduledTravel)
+    assert travel.patient is patient
+
+    assert travel.origin == "A"
+    assert travel.destination == "B"
+    assert travel.started_at == 4.0
+    assert travel.ends_at == 5.0
+
+    assert coordinator_b.pending_travels == [travel]
+    assert coordinator_b.pending_travels[0] is travel
+
+    # Movement is started, not completed.
+    assert env.now == 4.0
+    assert patient.state == PatientState.TRAVELLING
+    assert patient.location == "A"
+    assert patient.completed_tests == {"A"}
+
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+
+    # B has not received the patient yet.
+    assert_empty_station(station_b)
+    assert station_b.release_count == 0
+    assert station_b.peak_resource_count == 0
+
+    # A resource release precedes every continuation event.
+    actual_t4 = [
+        (
+            record.phase,
+            record.patient_id,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+        if record.sim_time == 4.0
+    ]
+
+    expected_t4 = [
+        (0, "u1", "SERVICE_END", "A"),
+        (1, "u1", "RESOURCE_RELEASE", "A"),
+        (3, "u1", "DECIDING", None),
+        (3, "u1", "ROUTE_DECISION", None),
+        (3, "u1", "TRAVEL_START", "B"),
+    ]
+
+    assert actual_t4 == expected_t4, (
+        f"Expected t=4: {expected_t4!r}\n"
+        f"Actual t=4: {actual_t4!r}"
+    )
+
+    # --------------------------------------------------
+    # Start B's Coordinator only after travel registration
+    # --------------------------------------------------
+    env.process(coordinator_b.run())
+
+    # During [4, 5), the patient remains at A.
+    env.run(until=4.5)
+
+    assert env.now == 4.5
+    assert patient.location == "A"
+    assert patient.state == PatientState.TRAVELLING
+    assert patient.completed_tests == {"A"}
+
+    assert coordinator_b.pending_travels == [travel]
+    assert_empty_station(station_b)
+
+    # --------------------------------------------------
+    # t=5: Travel completion and B service start
+    # --------------------------------------------------
+    # Run slightly past the bucket so that all events at t=5
+    # have been committed. B service is still active.
+    env.run(until=5.5)
+
+    assert env.now == 5.5
+
+    assert patient.location == "B"
+    assert patient.state == PatientState.IN_SERVICE
+    assert patient.completed_tests == {"A"}
+
+    assert coordinator_b.pending_travels == []
+
+    assert station_b.waiting == []
+    assert len(station_b.active) == 1
+
+    assert station_b.resource.count == 1
+    assert len(station_b.resource.users) == 1
+    assert station_b.resource.queue == []
+
+    assert station_b.release_count == 0
+    assert station_b.peak_resource_count == 1
+
+    actual_t5 = [
+        (
+            record.phase,
+            record.patient_id,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+        if record.sim_time == 5.0
+    ]
+
+    expected_t5 = [
+        (3, "u1", "TRAVEL_END", "B"),
+        (4, "u1", "QUEUE_ENTRY", "B"),
+        (5, "u1", "SERVICE_START", "B"),
+    ]
+
+    assert actual_t5 == expected_t5, (
+        f"Expected t=5: {expected_t5!r}\n"
+        f"Actual t=5: {actual_t5!r}"
+    )
+
+    assert not [
+        record
+        for record in log.records
+        if record.event_type == "DEPARTURE"
+    ]
+
+    # --------------------------------------------------
+    # t=8: Drain B service, release and departure
+    # --------------------------------------------------
+    env.run()
+
+    assert env.now == 8.0
+
+    # Compare the ENTIRE original append order.
+    # No sorting or event filtering is used here.
+    actual_raw = [
+        (
+            record.sim_time,
+            record.phase,
+            record.patient_id,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+    ]
+
+    expected_raw = [
+        (0.0, 4, "u1", "QUEUE_ENTRY", "A"),
+        (0.0, 5, "u1", "SERVICE_START", "A"),
+
+        (4.0, 0, "u1", "SERVICE_END", "A"),
+        (4.0, 1, "u1", "RESOURCE_RELEASE", "A"),
+        (4.0, 3, "u1", "DECIDING", None),
+        (4.0, 3, "u1", "ROUTE_DECISION", None),
+        (4.0, 3, "u1", "TRAVEL_START", "B"),
+
+        (5.0, 3, "u1", "TRAVEL_END", "B"),
+        (5.0, 4, "u1", "QUEUE_ENTRY", "B"),
+        (5.0, 5, "u1", "SERVICE_START", "B"),
+
+        (8.0, 0, "u1", "SERVICE_END", "B"),
+        (8.0, 1, "u1", "RESOURCE_RELEASE", "B"),
+        (8.0, 3, "u1", "DEPARTURE", None),
+    ]
+
+    raw_log = "\n".join(
+        f"seq={record.sequence_id} "
+        f"t={record.sim_time:g} "
+        f"phase={record.phase} "
+        f"patient={record.patient_id} "
+        f"event={record.event_type} "
+        f"station={record.station_id}"
+        for record in log.records
+    )
+
+    assert actual_raw == expected_raw, (
+        f"Expected:\n{expected_raw!r}\n"
+        f"Actual:\n{actual_raw!r}\n"
+        f"Raw append log:\n{raw_log}"
+    )
+
+    # --------------------------------------------------
+    # Service intervals and visit ownership
+    # --------------------------------------------------
+    service_starts = [
+        record
+        for record in log.records
+        if record.event_type == "SERVICE_START"
+    ]
+
+    service_ends = [
+        record
+        for record in log.records
+        if record.event_type == "SERVICE_END"
+    ]
+
+    assert [
+        (record.station_id, record.sim_time)
+        for record in service_starts
+    ] == [
+        ("A", 0.0),
+        ("B", 5.0),
+    ]
+
+    assert [
+        (record.station_id, record.sim_time)
+        for record in service_ends
+    ] == [
+        ("A", 4.0),
+        ("B", 8.0),
+    ]
+
+    queue_entries = [
+        record
+        for record in log.records
+        if record.event_type == "QUEUE_ENTRY"
+    ]
+
+    assert [
+        (record.station_id, record.sim_time)
+        for record in queue_entries
+    ] == [
+        ("A", 0.0),
+        ("B", 5.0),
+    ]
+
+    # Every station admission occurs exactly once.
+    assert len(queue_entries) == 2
+
+    # Each station's entry, start, end and release share
+    # the station's visit ID.
+    for station_id in ("A", "B"):
+        records_for_station = [
+            record
+            for record in log.records
+            if record.station_id == station_id
+            and record.event_type in (
+                "QUEUE_ENTRY",
+                "SERVICE_START",
+                "SERVICE_END",
+                "RESOURCE_RELEASE",
+            )
+        ]
+
+        assert [
+            record.event_type
+            for record in records_for_station
+        ] == [
+            "QUEUE_ENTRY",
+            "SERVICE_START",
+            "SERVICE_END",
+            "RESOURCE_RELEASE",
+        ]
+
+        assert len({
+            record.visit_id
+            for record in records_for_station
+        }) == 1
+
+    # No repeated arrival or movement start in the B continuation.
+    assert not [
+        record
+        for record in log.records
+        if record.event_type == "ARRIVAL"
+    ]
+
+    assert len([
+        record
+        for record in log.records
+        if record.event_type == "TRAVEL_START"
+    ]) == 1
+
+    assert len([
+        record
+        for record in log.records
+        if record.event_type == "TRAVEL_END"
+    ]) == 1
+
+    # Departure occurs once, after B releases the patient.
+    departures = [
+        record
+        for record in log.records
+        if record.event_type == "DEPARTURE"
+    ]
+
+    assert len(departures) == 1
+    assert departures[0].sim_time == 8.0
+    assert departures[0].phase == 3
+
+    release_b = [
+        record
+        for record in log.records
+        if record.event_type == "RESOURCE_RELEASE"
+        and record.station_id == "B"
+    ]
+
+    assert len(release_b) == 1
+    assert release_b[0].sim_time == 8.0
+    assert release_b[0].new_state == PatientState.FINISHED
+
+    assert (
+        release_b[0].sequence_id
+        < departures[0].sequence_id
+    )
+
+    # --------------------------------------------------
+    # Final patient and resource cleanup
+    # --------------------------------------------------
+    assert patient.state == PatientState.FINISHED
+    assert patient.location == "B"
+    assert patient.completed_tests == {"A", "B"}
+
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+
+    assert coordinator_b.pending == []
+    assert coordinator_b.pending_travels == []
+
+    assert_empty_station(station_a)
+    assert_empty_station(station_b)
+
+    assert station_a.release_count == 1
+    assert station_b.release_count == 1
+
+    assert station_a.peak_resource_count == 1
+    assert station_b.peak_resource_count == 1
+
+    # Global raw log phase and sequence contracts.
+    assert_phase_contract(log.records)
+
+    assert [
+        record.sequence_id
+        for record in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+    # Do not call assert_cleanup(): that helper is intended
+    # for single-station, single-package runs.
