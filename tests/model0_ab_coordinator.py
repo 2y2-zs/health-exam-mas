@@ -10,8 +10,9 @@ Current responsibilities:
 - Query the earliest active service completion across A and B
 - Process the next service-completion bucket with a SimPy generator
 - Dispatch available services synchronously in Phase 5
+- Register future or current-time arrivals without admitting patients
 
-Arrivals, routing, travel scheduling, departure processing and
+Arrival commitment, routing, travel scheduling, departure processing and
 the unified six-phase run() loop are not implemented yet.
 """
 
@@ -19,7 +20,10 @@ import simpy
 
 from health_exam_mas.model0 import EventLog, PatientAgent
 
-from model0_a_only_prototype import AOnlyCoordinatedStation
+from model0_a_only_prototype import (
+    AOnlyCoordinatedStation,
+    ScheduledArrival,
+)
 
 
 class MultiStationCoordinator:
@@ -87,6 +91,39 @@ class MultiStationCoordinator:
             station_id: stations[station_id]
             for station_id in self.station_ids
         }
+
+        # Registration only. Plans are not ARRIVAL events or queue entries.
+        self.pending_arrivals: list[ScheduledArrival] = []
+
+    def register_arrival(
+        self,
+        arrival: ScheduledArrival,
+    ) -> None:
+        """Register an arrival plan without committing Phase 2.
+
+        An arrival may be scheduled for the current time or the future.
+        A patient_id may have only one registered arrival, even when
+        separate PatientAgent objects share that ID.
+
+        Validation occurs before any modification. Registration does
+        not advance time, mutate patients, write events or enter queues.
+        """
+
+        if arrival.at < self.env.now:
+            raise ValueError(
+                "Arrival time cannot be in the past"
+            )
+
+        if any(
+            pending.patient.patient_id == arrival.patient.patient_id
+            for pending in self.pending_arrivals
+        ):
+            raise ValueError(
+                "Duplicate arrival for patient_id "
+                f"{arrival.patient.patient_id!r}"
+            )
+
+        self.pending_arrivals.append(arrival)
 
     def complete_due_services(self) -> list[PatientAgent]:
         """Synchronously commit due services across A and B.
