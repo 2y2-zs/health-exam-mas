@@ -1,5 +1,5 @@
 
-"""A/B multi-station Coordinator: initialization and service completion.
+"""A/B multi-station Coordinator: incremental coordination components.
 
 Current responsibilities:
 - Register exactly stations A and B
@@ -8,7 +8,8 @@ Current responsibilities:
 - Preserve deterministic iteration order: A, then B
 - Commit all due SERVICE_END events before any RESOURCE_RELEASE
 - Query the earliest active service completion across A and B
-- Process only the next service-completion bucket with a SimPy generator
+- Process the next service-completion bucket with a SimPy generator
+- Dispatch available services synchronously in Phase 5
 
 Arrivals, routing, travel scheduling, departure processing and
 the unified six-phase run() loop are not implemented yet.
@@ -22,7 +23,7 @@ from model0_a_only_prototype import AOnlyCoordinatedStation
 
 
 class MultiStationCoordinator:
-    """Register A/B and coordinate synchronous service completion."""
+    """Register A/B and coordinate service completion and dispatch."""
 
     STATION_ORDER = ("A", "B")
 
@@ -65,7 +66,7 @@ class MultiStationCoordinator:
                     f"does not match station_id {station.station_id!r}"
                 )
 
-            # Identity check: both stations must use the SAME Environment.
+            # Both stations must use the SAME Environment object.
             if station.env is not env:
                 raise ValueError(
                     f"Station {station_id!r} must share "
@@ -79,8 +80,7 @@ class MultiStationCoordinator:
         # Fixed station traversal order.
         self.station_ids: tuple[str, str] = self.STATION_ORDER
 
-        # Make an independent mapping in A -> B order.
-        # Do not depend on the caller's dictionary insertion order.
+        # Copy the registry in A -> B order.
         self.stations: dict[
             str, AOnlyCoordinatedStation
         ] = {
@@ -101,7 +101,7 @@ class MultiStationCoordinator:
         No yield, time advancement, routing or departure occurs.
         """
 
-        # Phase 0: collect and record all service completions first.
+        # Phase 0: collect and record all completions first.
         due_by_station = {}
 
         for station_id in self.station_ids:
@@ -111,8 +111,7 @@ class MultiStationCoordinator:
                 self.event_log
             )
 
-        # Phase 1: only after Phase 0 is fully completed,
-        # release resources and commit patient progress.
+        # Phase 1: release only after all Phase 0 work is complete.
         released: list[PatientAgent] = []
 
         for station_id in self.station_ids:
@@ -130,11 +129,11 @@ class MultiStationCoordinator:
     def next_service_completion_time(self) -> float | None:
         """Return the earliest active service end time across A and B.
 
-        This method only reads active visits. It does not advance
-        simulation time, update patient or station state, or write logs.
+        Only reads active visits. Does not advance simulation time,
+        change patient or station state, or write events.
 
-        Raise RuntimeError if any active service has already expired.
-        None means no active service; other simulation work may remain.
+        Raise RuntimeError if any active service is overdue.
+        None means no active service; other work may remain.
         """
 
         earliest: float | None = None
@@ -157,24 +156,37 @@ class MultiStationCoordinator:
     def process_next_service_completion(self):
         """SimPy generator: process only the next service completion bucket.
 
-        Returns the released PatientAgent objects through Process.value.
+        Returns released patients through Process.value.
 
-        If no active services exist, returns [] without a timeout.
-        If completion is due now, commits immediately without yield.
-        Otherwise, yields once to the earliest completion time.
+        With no active services, returns [] without a timeout.
+        If completion is due now, commits without yielding.
+        Otherwise, yields to the earliest completion time.
 
-        The synchronous Phase 0/1 batch contains no yield.
+        No yield occurs within the synchronous Phase 0/1 batch.
+        This method deliberately does NOT invoke Phase 5.
         """
 
         next_time = self.next_service_completion_time()
 
         if next_time is None:
-            # No active service; this does not mean the whole
-            # simulation has finished.
             return []
 
         if next_time > self.env.now:
             yield self.env.timeout(next_time - self.env.now)
 
-        # No yield between SERVICE_END and RESOURCE_RELEASE.
         return self.complete_due_services()
+
+    def dispatch_available_services(self) -> None:
+        """Phase 5: start available services at A, then B.
+
+        Each Station owns its FCFS queue and Resource allocation.
+        This method does not yield, advance time or process other phases.
+
+        The caller must complete Phases 2-4 before invoking Phase 5
+        when a unified time-bucket scheduler is introduced.
+        """
+
+        for station_id in self.station_ids:
+            self.stations[station_id].start_available(
+                self.event_log
+            )

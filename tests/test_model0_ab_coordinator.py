@@ -73,41 +73,28 @@ def test_ab_coordinator_registration_has_stable_order(
     assert coordinator.env is env
     assert coordinator.event_log is log
 
-    # The traversal order must not depend on input order.
+    # Traversal must not depend on input order.
     assert coordinator.station_ids == ("A", "B")
+    assert list(coordinator.stations) == ["A", "B"]
 
-    assert list(coordinator.stations) == [
-        "A",
-        "B",
-    ]
-
-    assert tuple(
-        coordinator.stations.values()
-    ) == (
+    assert tuple(coordinator.stations.values()) == (
         station_a,
         station_b,
     )
 
-    # Coordinator stores the original Station objects.
     assert coordinator.stations["A"] is station_a
     assert coordinator.stations["B"] is station_b
 
-    # The registry is a copy of the caller's dictionary.
+    # The registry is independent from the caller's dict.
     supplied["A"] = station_b
 
     assert coordinator.stations["A"] is station_a
-    assert list(coordinator.stations) == [
-        "A",
-        "B",
-    ]
+    assert list(coordinator.stations) == ["A", "B"]
 
-    # Initialization must not advance simulation time.
     assert env.now == 0
-
-    # No domain events or resource operations.
     assert log.records == []
 
-    # Scheduling is intentionally not implemented.
+    # The unified scheduling loop is not implemented yet.
     assert not hasattr(coordinator, "run")
 
     for station in (station_a, station_b):
@@ -138,25 +125,16 @@ def test_ab_coordinator_rejects_different_environments(
     other_env = simpy.Environment()
 
     stations = {
-        "A": AOnlyCoordinatedStation(
-            env,
-            station_id="A",
-        ),
-        "B": AOnlyCoordinatedStation(
-            env,
-            station_id="B",
-        ),
+        "A": AOnlyCoordinatedStation(env, station_id="A"),
+        "B": AOnlyCoordinatedStation(env, station_id="B"),
     }
 
-    # Replace one station with one built in another Environment.
     stations[foreign_station] = AOnlyCoordinatedStation(
         other_env,
         station_id=foreign_station,
     )
 
-    log = EventLog(
-        run_id="AB_INIT_DIFFERENT_ENV"
-    )
+    log = EventLog(run_id="AB_INIT_DIFFERENT_ENV")
 
     with pytest.raises(
         ValueError,
@@ -183,34 +161,23 @@ def test_ab_coordinator_rejects_different_environments(
 def test_ab_coordinator_rejects_station_id_mismatch(
     wrong_key,
 ):
-    """A dictionary key must match its Station's station_id."""
+    """A dictionary key must match the Station's station_id."""
 
     env = simpy.Environment()
 
-    station_a = AOnlyCoordinatedStation(
-        env,
-        station_id="A",
-    )
-    station_b = AOnlyCoordinatedStation(
-        env,
-        station_id="B",
-    )
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
 
     stations = {
         "A": station_a,
         "B": station_b,
     }
 
-    # Deliberately associate one key with the wrong station.
     stations[wrong_key] = (
-        station_b
-        if wrong_key == "A"
-        else station_a
+        station_b if wrong_key == "A" else station_a
     )
 
-    log = EventLog(
-        run_id="AB_INIT_KEY_MISMATCH"
-    )
+    log = EventLog(run_id="AB_INIT_KEY_MISMATCH")
 
     with pytest.raises(
         ValueError,
@@ -268,7 +235,7 @@ def test_ab_coordinator_rejects_missing_or_extra_stations(
 def prepare_ab_services_ending_at_t4():
     """Prepare A [0,4) and B [1,4), without a Coordinator run().
 
-    Return the environment at t=1, with both services active.
+    Return the Environment at t=1, with both services active.
     """
 
     env = simpy.Environment()
@@ -284,8 +251,7 @@ def prepare_ab_services_ending_at_t4():
 
     log = EventLog(run_id="AB_DUE_SERVICES")
 
-    # Deliberately supply the station dictionary in reverse order.
-    # MultiStationCoordinator must still process A before B.
+    # Deliberately reverse the supplied dictionary order.
     coordinator = MultiStationCoordinator(
         env=env,
         stations={
@@ -295,8 +261,7 @@ def prepare_ab_services_ending_at_t4():
         event_log=log,
     )
 
-    # Use opposite patient ranks to verify that the required
-    # ordering is by station A -> B, not a global rank sort.
+    # Opposite patient ranks confirm station traversal order.
     patient_a = PatientAgent(
         patient_id="uA",
         patient_rank=2,
@@ -308,7 +273,7 @@ def prepare_ab_services_ending_at_t4():
         package=B_ONLY,
     )
 
-    # t=0: Start A service [0,4).
+    # t=0: A service [0,4).
     patient_a.location = "A"
     patient_a.state = PatientState.TRAVELLING
 
@@ -318,7 +283,7 @@ def prepare_ab_services_ending_at_t4():
     assert patient_a.state == PatientState.IN_SERVICE
     assert station_a.resource.count == 1
 
-    # t=1: Start B service [1,4).
+    # t=1: B service [1,4).
     env.run(until=1.0)
 
     assert env.now == 1.0
@@ -362,38 +327,32 @@ def test_complete_due_services_all_ends_before_any_release():
         patient_b,
     ) = prepare_ab_services_ending_at_t4()
 
-    # Both stations are occupied before the shared completion time.
     assert env.now == 1.0
+
     assert station_a.resource.count == 1
     assert station_b.resource.count == 1
 
     assert patient_a.completed_tests == set()
     assert patient_b.completed_tests == set()
 
-    # Advance to the shared due time t=4.
     env.run(until=4.0)
 
     assert env.now == 4.0
 
-    # Both services are still active until Phase 1.
     assert len(station_a.active) == 1
     assert len(station_b.active) == 1
 
     assert station_a.resource.count == 1
     assert station_b.resource.count == 1
 
-    # One synchronous Coordinator call.
     released = coordinator.complete_due_services()
 
-    # All released patients are returned in station order.
     assert len(released) == 2
     assert released[0] is patient_a
     assert released[1] is patient_b
 
-    # The method must not advance simulation time.
     assert env.now == 4.0
 
-    # Strict t=4 raw EventLog append order.
     actual_t4 = [
         (
             record.phase,
@@ -429,7 +388,6 @@ def test_complete_due_services_all_ends_before_any_release():
         f"Raw t=4 log:\n{raw_t4_log}"
     )
 
-    # All SERVICE_END records precede both releases.
     ends = [
         record
         for record in log.records
@@ -449,7 +407,6 @@ def test_complete_due_services_all_ends_before_any_release():
         < min(record.sequence_id for record in releases)
     )
 
-    # Both patients completed their own packages.
     assert patient_a.state == PatientState.FINISHED
     assert patient_a.location == "A"
     assert patient_a.completed_tests == {"A"}
@@ -467,7 +424,6 @@ def test_complete_due_services_all_ends_before_any_release():
         assert record.new_state == PatientState.FINISHED
         assert record.phase == 1
 
-    # Complete Resource cleanup at both stations.
     for station in (station_a, station_b):
         assert station.waiting == []
         assert station.active == {}
@@ -479,14 +435,12 @@ def test_complete_due_services_all_ends_before_any_release():
         assert station.release_count == 1
         assert station.peak_resource_count == 1
 
-    # The method does not perform Phase 3 departures.
     assert not [
         record
         for record in log.records
         if record.event_type == "DEPARTURE"
     ]
 
-    # Global raw log phase and sequence checks.
     expected_events = [
         (0.0, 4, "QUEUE_ENTRY", "A"),
         (0.0, 5, "SERVICE_START", "A"),
@@ -517,7 +471,6 @@ def test_complete_due_services_all_ends_before_any_release():
 
     for earlier, later in zip(log.records, log.records[1:]):
         assert earlier.sim_time <= later.sim_time
-
         if earlier.sim_time == later.sim_time:
             assert earlier.phase <= later.phase
 
@@ -535,12 +488,10 @@ def test_complete_due_services_without_due_has_no_side_effects():
         patient_b,
     ) = prepare_ab_services_ending_at_t4()
 
-    # Both stations remain busy at t=2.
     env.run(until=2.0)
 
     assert env.now == 2.0
 
-    # Capture the original log and domain state.
     records_before = list(log.records)
 
     patient_a_before = (
@@ -571,16 +522,12 @@ def test_complete_due_services_without_due_has_no_side_effects():
         station_b.peak_resource_count,
     )
 
-    # No service is due at the current time.
     released = coordinator.complete_due_services()
 
     assert released == []
     assert env.now == 2.0
-
-    # No event records were appended.
     assert log.records == records_before
 
-    # No patient state or progress changed.
     assert (
         patient_a.state,
         patient_a.location,
@@ -597,7 +544,6 @@ def test_complete_due_services_without_due_has_no_side_effects():
         patient_b.active_station_id,
     ) == patient_b_before
 
-    # Active visits retain the same objects and ownership.
     assert station_a.active.keys() == active_a_before.keys()
     assert station_b.active.keys() == active_b_before.keys()
 
@@ -607,7 +553,6 @@ def test_complete_due_services_without_due_has_no_side_effects():
     for visit_id, visit in active_b_before.items():
         assert station_b.active[visit_id] is visit
 
-    # Both Resources remain occupied.
     assert station_a.resource.count == 1
     assert station_b.resource.count == 1
 
@@ -627,11 +572,11 @@ def test_complete_due_services_without_due_has_no_side_effects():
         station_b.peak_resource_count,
     ) == counts_before
 
-    # Repeated no-due calls also have no effect.
     assert coordinator.complete_due_services() == []
 
     assert env.now == 2.0
     assert log.records == records_before
+
     assert station_a.resource.count == 1
     assert station_b.resource.count == 1
 
@@ -674,11 +619,9 @@ def test_next_service_completion_time_both_end_at_t4_is_pure():
     users_a_before = list(station_a.resource.users)
     users_b_before = list(station_b.resource.users)
 
-    # Query while both services are in progress.
     assert coordinator.next_service_completion_time() == 4.0
     assert coordinator.next_service_completion_time() == 4.0
 
-    # Querying must not advance time or change anything.
     assert env.now == 1.0
     assert log.records == records_before
 
@@ -713,21 +656,22 @@ def test_next_service_completion_time_both_end_at_t4_is_pure():
         patient_b.active_station_id,
     ) == patient_b_before
 
-    # At exactly t=4 the services are due, not overdue.
     env.run(until=4.0)
 
     assert env.now == 4.0
     assert coordinator.next_service_completion_time() == 4.0
 
-    # Querying at the due boundary still commits nothing.
     assert log.records == records_before
+
     assert station_a.release_count == 0
     assert station_b.release_count == 0
+
     assert station_a.resource.count == 1
     assert station_b.resource.count == 1
 
     assert patient_a.state == PatientState.IN_SERVICE
     assert patient_b.state == PatientState.IN_SERVICE
+
     assert patient_a.completed_tests == set()
     assert patient_b.completed_tests == set()
 
@@ -746,11 +690,8 @@ def test_next_service_completion_time_updates_after_a_release():
         station_id="B",
     )
 
-    log = EventLog(
-        run_id="AB_STAGGERED_SERVICE_TIMES"
-    )
+    log = EventLog(run_id="AB_STAGGERED_SERVICE_TIMES")
 
-    # Reverse input order must not affect the time query.
     coordinator = MultiStationCoordinator(
         env=env,
         stations={
@@ -771,17 +712,12 @@ def test_next_service_completion_time_updates_after_a_release():
         package=B_ONLY,
     )
 
-    # A service [0,4).
     patient_a.location = "A"
     patient_a.state = PatientState.TRAVELLING
 
     station_a.enqueue(patient_a, log)
     station_a.start_available(log)
 
-    assert station_a.resource.count == 1
-    assert patient_a.state == PatientState.IN_SERVICE
-
-    # B service [2,5).
     env.run(until=2.0)
 
     patient_b.location = "B"
@@ -791,17 +727,13 @@ def test_next_service_completion_time_updates_after_a_release():
     station_b.start_available(log)
 
     assert env.now == 2.0
-    assert station_b.resource.count == 1
-    assert patient_b.state == PatientState.IN_SERVICE
+    assert coordinator.next_service_completion_time() == 4.0
 
-    # The first completion is at A, t=4.
     records_before_query = list(log.records)
 
-    assert coordinator.next_service_completion_time() == 4.0
     assert env.now == 2.0
     assert log.records == records_before_query
 
-    # Advance externally to A's completion boundary.
     env.run(until=4.0)
 
     assert coordinator.next_service_completion_time() == 4.0
@@ -819,14 +751,13 @@ def test_next_service_completion_time_updates_after_a_release():
     assert station_a.resource.count == 0
     assert station_a.release_count == 1
 
-    # B is not due at t=4 and must remain in service.
     assert patient_b.state == PatientState.IN_SERVICE
     assert patient_b.completed_tests == set()
+
     assert len(station_b.active) == 1
     assert station_b.resource.count == 1
     assert station_b.release_count == 0
 
-    # After A's release, the earliest active completion is B at t=5.
     records_before_query = list(log.records)
 
     assert coordinator.next_service_completion_time() == 5.0
@@ -836,7 +767,6 @@ def test_next_service_completion_time_updates_after_a_release():
     assert log.records == records_before_query
     assert station_b.resource.count == 1
 
-    # Advance externally to B's completion boundary.
     env.run(until=5.0)
 
     assert coordinator.next_service_completion_time() == 5.0
@@ -850,9 +780,7 @@ def test_next_service_completion_time_updates_after_a_release():
     assert patient_b.state == PatientState.FINISHED
     assert patient_b.completed_tests == {"B"}
 
-    # No active service remains after both releases.
     assert coordinator.next_service_completion_time() is None
-
     assert env.now == 5.0
 
     for station in (station_a, station_b):
@@ -863,7 +791,6 @@ def test_next_service_completion_time_updates_after_a_release():
         assert station.resource.queue == []
         assert station.release_count == 1
 
-    # Raw log order for the two separate completion buckets.
     actual_completions = [
         (
             record.sim_time,
@@ -885,7 +812,6 @@ def test_next_service_completion_time_updates_after_a_release():
         (5.0, 1, "RESOURCE_RELEASE", "B"),
     ]
 
-    # Query and service completion do not commit Phase 3 departure.
     assert not [
         record
         for record in log.records
@@ -907,9 +833,7 @@ def test_next_service_completion_time_none_when_no_active_visits():
         station_id="B",
     )
 
-    log = EventLog(
-        run_id="AB_NO_ACTIVE_SERVICE"
-    )
+    log = EventLog(run_id="AB_NO_ACTIVE_SERVICE")
 
     coordinator = MultiStationCoordinator(
         env=env,
@@ -920,18 +844,17 @@ def test_next_service_completion_time_none_when_no_active_visits():
         event_log=log,
     )
 
-    # Initially there are no active services at either station.
     assert coordinator.next_service_completion_time() is None
 
     assert env.now == 0
     assert log.records == []
 
-    # Prepare a patient waiting at A, but do NOT start service.
     patient = PatientAgent(
         patient_id="u1",
         patient_rank=1,
         package=A_ONLY,
     )
+
     patient.location = "A"
     patient.state = PatientState.TRAVELLING
 
@@ -944,7 +867,6 @@ def test_next_service_completion_time_none_when_no_active_visits():
     assert station_a.resource.count == 0
     assert station_b.active == {}
 
-    # Work remains in the domain queue, but no service is active.
     records_before = list(log.records)
 
     assert coordinator.next_service_completion_time() is None
@@ -983,7 +905,6 @@ def test_next_service_completion_time_rejects_overdue_active_visit():
         patient_b,
     ) = prepare_ab_services_ending_at_t4()
 
-    # Both active services end at t=4, but no release is committed.
     env.run(until=4.5)
 
     assert env.now == 4.5
@@ -1024,11 +945,9 @@ def test_next_service_completion_time_rejects_overdue_active_visit():
     ):
         coordinator.next_service_completion_time()
 
-    # Failure must not change simulation time or write events.
     assert env.now == 4.5
     assert log.records == records_before
 
-    # Neither visit may be removed by a failed query.
     assert station_a.active.keys() == active_a_before.keys()
     assert station_b.active.keys() == active_b_before.keys()
 
@@ -1040,7 +959,6 @@ def test_next_service_completion_time_rejects_overdue_active_visit():
         assert station_b.active[visit_id] is visit
         assert visit.ends_at == 4.0
 
-    # Both patients remain in service without progress changes.
     assert (
         patient_a.state,
         patient_a.location,
@@ -1057,7 +975,6 @@ def test_next_service_completion_time_rejects_overdue_active_visit():
         patient_b.active_station_id,
     ) == patient_b_before
 
-    # Resource ownership and release counters are unchanged.
     assert station_a.resource.count == 1
     assert station_b.resource.count == 1
 
@@ -1095,15 +1012,14 @@ def test_process_next_service_completion_same_time_batch():
         coordinator.process_next_service_completion()
     )
 
-    # Creating the process does not itself complete services.
     assert patient_a.state == PatientState.IN_SERVICE
     assert patient_b.state == PatientState.IN_SERVICE
+
     assert station_a.resource.count == 1
     assert station_b.resource.count == 1
 
     env.run()
 
-    # The process must return the exact released patient objects.
     assert process.triggered
     assert len(process.value) == 2
     assert process.value[0] is patient_a
@@ -1111,7 +1027,6 @@ def test_process_next_service_completion_same_time_batch():
 
     assert env.now == 4.0
 
-    # Full same-time phase ordering, without sorting EventLog.
     actual_t4 = [
         (
             record.phase,
@@ -1131,6 +1046,7 @@ def test_process_next_service_completion_same_time_batch():
 
     assert patient_a.state == PatientState.FINISHED
     assert patient_a.completed_tests == {"A"}
+
     assert patient_b.state == PatientState.FINISHED
     assert patient_b.completed_tests == {"B"}
 
@@ -1161,14 +1077,8 @@ def test_process_next_service_completion_staggered_batches():
 
     env = simpy.Environment()
 
-    station_a = AOnlyCoordinatedStation(
-        env,
-        station_id="A",
-    )
-    station_b = AOnlyCoordinatedStation(
-        env,
-        station_id="B",
-    )
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
 
     log = EventLog(run_id="AB_GENERATOR_STAGGERED")
 
@@ -1187,6 +1097,7 @@ def test_process_next_service_completion_staggered_batches():
     # A service [0,4).
     patient_a.location = "A"
     patient_a.state = PatientState.TRAVELLING
+
     station_a.enqueue(patient_a, log)
     station_a.start_available(log)
 
@@ -1195,13 +1106,13 @@ def test_process_next_service_completion_staggered_batches():
 
     patient_b.location = "B"
     patient_b.state = PatientState.TRAVELLING
+
     station_b.enqueue(patient_b, log)
     station_b.start_available(log)
 
     assert env.now == 2.0
     assert coordinator.next_service_completion_time() == 4.0
 
-    # First generator invocation: process only t=4.
     first = env.process(
         coordinator.process_next_service_completion()
     )
@@ -1220,7 +1131,6 @@ def test_process_next_service_completion_staggered_batches():
     assert station_a.resource.count == 0
     assert station_a.release_count == 1
 
-    # B has not completed yet.
     assert patient_b.state == PatientState.IN_SERVICE
     assert patient_b.completed_tests == set()
     assert len(station_b.active) == 1
@@ -1229,7 +1139,6 @@ def test_process_next_service_completion_staggered_batches():
 
     assert coordinator.next_service_completion_time() == 5.0
 
-    # Second generator invocation: process only t=5.
     second = env.process(
         coordinator.process_next_service_completion()
     )
@@ -1238,6 +1147,7 @@ def test_process_next_service_completion_staggered_batches():
 
     assert env.now == 5.0
     assert second.triggered
+
     assert len(second.value) == 1
     assert second.value[0] is patient_b
 
@@ -1288,7 +1198,7 @@ def test_process_next_service_completion_staggered_batches():
 
 
 def test_process_next_service_completion_due_now():
-    """When the next completion is already due, no timeout is needed."""
+    """When completion is due at env.now, no timeout is needed."""
 
     (
         env,
@@ -1300,7 +1210,6 @@ def test_process_next_service_completion_due_now():
         patient_b,
     ) = prepare_ab_services_ending_at_t4()
 
-    # Move the clock externally to the exact due boundary.
     env.run(until=4.0)
 
     assert env.now == 4.0
@@ -1312,8 +1221,6 @@ def test_process_next_service_completion_due_now():
 
     env.run()
 
-    # The generator processes the current bucket at t=4,
-    # without advancing to a later time.
     assert env.now == 4.0
     assert process.triggered
 
@@ -1350,14 +1257,8 @@ def test_process_next_service_completion_without_active_service():
 
     env = simpy.Environment()
 
-    station_a = AOnlyCoordinatedStation(
-        env,
-        station_id="A",
-    )
-    station_b = AOnlyCoordinatedStation(
-        env,
-        station_id="B",
-    )
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
 
     log = EventLog(run_id="AB_GENERATOR_NO_ACTIVE")
 
@@ -1372,7 +1273,6 @@ def test_process_next_service_completion_without_active_service():
 
     assert coordinator.next_service_completion_time() is None
 
-    # First call with no work at all.
     first = env.process(
         coordinator.process_next_service_completion()
     )
@@ -1383,7 +1283,6 @@ def test_process_next_service_completion_without_active_service():
     assert env.now == 0
     assert log.records == []
 
-    # Add domain waiting work without starting service.
     patient = PatientAgent("u1", 1, A_ONLY)
     patient.location = "A"
     patient.state = PatientState.TRAVELLING
@@ -1396,7 +1295,6 @@ def test_process_next_service_completion_without_active_service():
 
     records_before = list(log.records)
 
-    # None does not mean the waiting queue has been drained.
     assert coordinator.next_service_completion_time() is None
 
     second = env.process(
@@ -1425,4 +1323,490 @@ def test_process_next_service_completion_without_active_service():
         assert station.resource.queue == []
         assert station.release_count == 0
 
-    # The wider simulation still has a waiting patient.
+
+# ==========================================================
+# New Phase 5 tests
+# ==========================================================
+
+
+def test_dispatch_available_services_starts_both_idle_stations():
+    """Both A and B start their waiting patient immediately at t=0.
+
+    The input registry is reversed, but Phase 5 SERVICE_START
+    must be recorded in A -> B order.
+    """
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(
+        env,
+        station_id="A",
+    )
+    station_b = AOnlyCoordinatedStation(
+        env,
+        station_id="B",
+    )
+
+    log = EventLog(run_id="AB_DISPATCH_IDLE_STATIONS")
+
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={
+            "B": station_b,
+            "A": station_a,
+        },
+        event_log=log,
+    )
+
+    patient_a = PatientAgent("uA", 2, A_ONLY)
+    patient_b = PatientAgent("uB", 1, B_ONLY)
+
+    patient_a.location = "A"
+    patient_a.state = PatientState.TRAVELLING
+
+    patient_b.location = "B"
+    patient_b.state = PatientState.TRAVELLING
+
+    # Phase 4: both waiting queues are populated.
+    station_a.enqueue(patient_a, log)
+    station_b.enqueue(patient_b, log)
+
+    assert env.now == 0
+    assert patient_a.state == PatientState.WAITING
+    assert patient_b.state == PatientState.WAITING
+
+    assert len(station_a.waiting) == 1
+    assert len(station_b.waiting) == 1
+
+    assert station_a.active == {}
+    assert station_b.active == {}
+
+    assert station_a.resource.count == 0
+    assert station_b.resource.count == 0
+
+    # Phase 5: one synchronous dispatch call.
+    coordinator.dispatch_available_services()
+
+    assert env.now == 0
+
+    assert patient_a.state == PatientState.IN_SERVICE
+    assert patient_b.state == PatientState.IN_SERVICE
+
+    assert station_a.waiting == []
+    assert station_b.waiting == []
+
+    assert len(station_a.active) == 1
+    assert len(station_b.active) == 1
+
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    assert len(station_a.resource.users) == 1
+    assert len(station_b.resource.users) == 1
+
+    assert station_a.resource.queue == []
+    assert station_b.resource.queue == []
+
+    # A lasts 4 minutes; B lasts 3 minutes.
+    active_a = next(iter(station_a.active.values()))
+    active_b = next(iter(station_b.active.values()))
+
+    assert active_a.patient is patient_a
+    assert active_b.patient is patient_b
+
+    assert active_a.ends_at == 4.0
+    assert active_b.ends_at == 3.0
+
+    assert station_a.peak_resource_count == 1
+    assert station_b.peak_resource_count == 1
+
+    assert station_a.release_count == 0
+    assert station_b.release_count == 0
+
+    # Strict original log order, without sorting.
+    assert [
+        (
+            record.sim_time,
+            record.phase,
+            record.patient_id,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+    ] == [
+        (0.0, 4, "uA", "QUEUE_ENTRY", "A"),
+        (0.0, 4, "uB", "QUEUE_ENTRY", "B"),
+        (0.0, 5, "uA", "SERVICE_START", "A"),
+        (0.0, 5, "uB", "SERVICE_START", "B"),
+    ]
+
+    assert [
+        record.sequence_id
+        for record in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+    # No service completion or departure was generated.
+    assert not [
+        record
+        for record in log.records
+        if record.event_type in (
+            "SERVICE_END",
+            "RESOURCE_RELEASE",
+            "DEPARTURE",
+        )
+    ]
+
+
+def test_dispatch_available_services_when_full_is_idempotent():
+    """Repeated Phase 5 dispatch cannot start another visit at capacity.
+
+    Both stations have two waiting patients but capacity one.
+    After initial dispatch, one patient at each station remains waiting.
+    Repeating dispatch at the same time must have no effects.
+    """
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+
+    log = EventLog(run_id="AB_DISPATCH_FULL")
+
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={
+            "A": station_a,
+            "B": station_b,
+        },
+        event_log=log,
+    )
+
+    a1 = PatientAgent("a1", 1, A_ONLY)
+    a2 = PatientAgent("a2", 2, A_ONLY)
+    b1 = PatientAgent("b1", 1, B_ONLY)
+    b2 = PatientAgent("b2", 2, B_ONLY)
+
+    # Complete all Phase 4 queue entries before Phase 5.
+    for patient in (a1, a2):
+        patient.location = "A"
+        patient.state = PatientState.TRAVELLING
+        station_a.enqueue(patient, log)
+
+    for patient in (b1, b2):
+        patient.location = "B"
+        patient.state = PatientState.TRAVELLING
+        station_b.enqueue(patient, log)
+
+    assert len(station_a.waiting) == 2
+    assert len(station_b.waiting) == 2
+
+    coordinator.dispatch_available_services()
+
+    # Each station starts its lower-rank patient.
+    assert a1.state == PatientState.IN_SERVICE
+    assert b1.state == PatientState.IN_SERVICE
+
+    assert a2.state == PatientState.WAITING
+    assert b2.state == PatientState.WAITING
+
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    assert len(station_a.waiting) == 1
+    assert len(station_b.waiting) == 1
+
+    assert station_a.waiting[0].patient is a2
+    assert station_b.waiting[0].patient is b2
+
+    assert [
+        (record.patient_id, record.station_id)
+        for record in log.records
+        if record.event_type == "SERVICE_START"
+    ] == [
+        ("a1", "A"),
+        ("b1", "B"),
+    ]
+
+    # Snapshot all effects before the repeated call.
+    records_before = list(log.records)
+
+    waiting_a_before = list(station_a.waiting)
+    waiting_b_before = list(station_b.waiting)
+
+    active_a_before = dict(station_a.active)
+    active_b_before = dict(station_b.active)
+
+    users_a_before = list(station_a.resource.users)
+    users_b_before = list(station_b.resource.users)
+
+    counts_before = (
+        station_a.peak_resource_count,
+        station_b.peak_resource_count,
+        station_a.release_count,
+        station_b.release_count,
+    )
+
+    # Repeated dispatch at capacity must do nothing.
+    coordinator.dispatch_available_services()
+
+    assert env.now == 0
+    assert log.records == records_before
+
+    assert station_a.waiting == waiting_a_before
+    assert station_b.waiting == waiting_b_before
+
+    assert station_a.active.keys() == active_a_before.keys()
+    assert station_b.active.keys() == active_b_before.keys()
+
+    for visit_id, visit in active_a_before.items():
+        assert station_a.active[visit_id] is visit
+
+    for visit_id, visit in active_b_before.items():
+        assert station_b.active[visit_id] is visit
+
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    assert station_a.resource.users == users_a_before
+    assert station_b.resource.users == users_b_before
+
+    assert station_a.resource.queue == []
+    assert station_b.resource.queue == []
+
+    assert (
+        station_a.peak_resource_count,
+        station_b.peak_resource_count,
+        station_a.release_count,
+        station_b.release_count,
+    ) == counts_before
+
+    assert a2.state == PatientState.WAITING
+    assert b2.state == PatientState.WAITING
+
+    # Still only two SERVICE_START events in total.
+    assert len([
+        record
+        for record in log.records
+        if record.event_type == "SERVICE_START"
+    ]) == 2
+
+    assert [
+        record.sequence_id
+        for record in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+
+def test_dispatch_available_services_starts_waiters_at_release_time():
+    """Phase 5 can reuse capacity at t=4 after synchronous Phase 0/1.
+
+    A service [0,4) and B service [1,4) finish simultaneously.
+    At t=2, one additional patient waits at each station.
+
+    At t=4, complete_due_services() releases both original visits.
+    A separate dispatch_available_services() call then starts the
+    waiting patients at t=4, without advancing time.
+    """
+
+    (
+        env,
+        coordinator,
+        station_a,
+        station_b,
+        log,
+        patient_a,
+        patient_b,
+    ) = prepare_ab_services_ending_at_t4()
+
+    # t=1: both stations are busy.
+    assert env.now == 1.0
+
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    # t=2: introduce additional waiting patients at both stations.
+    env.run(until=2.0)
+
+    waiting_a = PatientAgent("uA2", 3, A_ONLY)
+    waiting_b = PatientAgent("uB2", 4, B_ONLY)
+
+    waiting_a.location = "A"
+    waiting_a.state = PatientState.TRAVELLING
+
+    waiting_b.location = "B"
+    waiting_b.state = PatientState.TRAVELLING
+
+    station_a.enqueue(waiting_a, log)
+    station_b.enqueue(waiting_b, log)
+
+    assert env.now == 2.0
+
+    assert waiting_a.state == PatientState.WAITING
+    assert waiting_b.state == PatientState.WAITING
+
+    assert len(station_a.waiting) == 1
+    assert len(station_b.waiting) == 1
+
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    assert len(station_a.active) == 1
+    assert len(station_b.active) == 1
+
+    # Full-capacity dispatch does not start either waiter.
+    records_before = list(log.records)
+
+    coordinator.dispatch_available_services()
+
+    assert log.records == records_before
+    assert waiting_a.state == PatientState.WAITING
+    assert waiting_b.state == PatientState.WAITING
+
+    # t=4: both original services reach completion.
+    env.run(until=4.0)
+
+    assert env.now == 4.0
+
+    # Phase 0/1: release every completed service.
+    released = coordinator.complete_due_services()
+
+    assert len(released) == 2
+    assert released[0] is patient_a
+    assert released[1] is patient_b
+
+    assert patient_a.state == PatientState.FINISHED
+    assert patient_b.state == PatientState.FINISHED
+
+    assert patient_a.completed_tests == {"A"}
+    assert patient_b.completed_tests == {"B"}
+
+    assert station_a.release_count == 1
+    assert station_b.release_count == 1
+
+    assert station_a.resource.count == 0
+    assert station_b.resource.count == 0
+
+    assert station_a.active == {}
+    assert station_b.active == {}
+
+    # The domain queues remain intact after Phase 0/1.
+    assert len(station_a.waiting) == 1
+    assert len(station_b.waiting) == 1
+
+    assert station_a.waiting[0].patient is waiting_a
+    assert station_b.waiting[0].patient is waiting_b
+
+    assert waiting_a.state == PatientState.WAITING
+    assert waiting_b.state == PatientState.WAITING
+
+    # Phase 5: explicitly dispatch at the SAME simulation time.
+    # In a future unified loop, Phases 2-4 will execute here.
+    coordinator.dispatch_available_services()
+
+    assert env.now == 4.0
+
+    assert waiting_a.state == PatientState.IN_SERVICE
+    assert waiting_b.state == PatientState.IN_SERVICE
+
+    assert station_a.waiting == []
+    assert station_b.waiting == []
+
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    assert len(station_a.active) == 1
+    assert len(station_b.active) == 1
+
+    assert station_a.resource.queue == []
+    assert station_b.resource.queue == []
+
+    assert station_a.release_count == 1
+    assert station_b.release_count == 1
+
+    # New service intervals begin at t=4.
+    active_a = next(iter(station_a.active.values()))
+    active_b = next(iter(station_b.active.values()))
+
+    assert active_a.patient is waiting_a
+    assert active_b.patient is waiting_b
+
+    assert active_a.ends_at == 8.0
+    assert active_b.ends_at == 7.0
+
+    # Original raw t=4 order must preserve all phase boundaries.
+    actual_t4 = [
+        (
+            record.phase,
+            record.patient_id,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+        if record.sim_time == 4.0
+    ]
+
+    expected_t4 = [
+        (0, "uA", "SERVICE_END", "A"),
+        (0, "uB", "SERVICE_END", "B"),
+        (1, "uA", "RESOURCE_RELEASE", "A"),
+        (1, "uB", "RESOURCE_RELEASE", "B"),
+        (5, "uA2", "SERVICE_START", "A"),
+        (5, "uB2", "SERVICE_START", "B"),
+    ]
+
+    raw_t4_log = "\n".join(
+        f"seq={record.sequence_id} "
+        f"t={record.sim_time:g} "
+        f"phase={record.phase} "
+        f"patient={record.patient_id} "
+        f"event={record.event_type} "
+        f"station={record.station_id}"
+        for record in log.records
+        if record.sim_time == 4.0
+    )
+
+    assert actual_t4 == expected_t4, (
+        f"Expected: {expected_t4!r}\n"
+        f"Actual: {actual_t4!r}\n"
+        f"Raw t=4 log:\n{raw_t4_log}"
+    )
+
+    # All releases precede either new SERVICE_START.
+    releases_t4 = [
+        record
+        for record in log.records
+        if record.sim_time == 4.0
+        and record.event_type == "RESOURCE_RELEASE"
+    ]
+
+    starts_t4 = [
+        record
+        for record in log.records
+        if record.sim_time == 4.0
+        and record.event_type == "SERVICE_START"
+    ]
+
+    assert len(releases_t4) == 2
+    assert len(starts_t4) == 2
+
+    assert (
+        max(record.sequence_id for record in releases_t4)
+        < min(record.sequence_id for record in starts_t4)
+    )
+
+    assert [
+        record.sequence_id
+        for record in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+    for earlier, later in zip(log.records, log.records[1:]):
+        assert earlier.sim_time <= later.sim_time
+
+        if earlier.sim_time == later.sim_time:
+            assert earlier.phase <= later.phase
+
+    # Neither service completion nor dispatch handles Departure.
+    assert not [
+        record
+        for record in log.records
+        if record.event_type == "DEPARTURE"
+    ]
