@@ -7,6 +7,7 @@ Current responsibilities:
 - Validate dictionary keys against station.station_id
 - Preserve deterministic iteration order: A, then B
 - Commit all due SERVICE_END events before any RESOURCE_RELEASE
+- Query the earliest active service completion across A and B
 
 Arrivals, routing, travel scheduling, departure processing and
 the unified six-phase run() loop are not implemented yet.
@@ -124,3 +125,30 @@ class MultiStationCoordinator:
             )
 
         return released
+
+    def next_service_completion_time(self) -> float | None:
+        """Return the earliest active service end time across A and B.
+
+        This method only reads active visits. It does not advance
+        simulation time, update patient or station state, or write logs.
+
+        Raise RuntimeError if any active service has already expired.
+        None means no active service; other simulation work may remain.
+        """
+
+        earliest: float | None = None
+
+        for station_id in self.station_ids:
+            station = self.stations[station_id]
+
+            for visit in station.active.values():
+                if visit.ends_at < self.env.now:
+                    raise RuntimeError(
+                        "Overdue active service completion "
+                        f"at station {station_id!r}"
+                    )
+
+                if earliest is None or visit.ends_at < earliest:
+                    earliest = visit.ends_at
+
+        return earliest
