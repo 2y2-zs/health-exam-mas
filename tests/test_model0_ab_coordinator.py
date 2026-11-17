@@ -3952,3 +3952,456 @@ def test_commit_queue_entries_invalid_batch_is_atomic(failure):
     assert env.now == (
         1.0 if failure == "stale_travel_end" else 0.0
     )
+
+# ==========================================================
+# Integration: ENTRY -> Phase 2 -> 3 -> 4 -> 5 at t=0
+# ==========================================================
+
+
+def test_entry_flow_three_patients_through_phase5_at_t0():
+    """Integrate the existing Phase 0-2 bucket and Phase 3-5 methods.
+
+    Three patients arrive simultaneously at t=0, registered in
+    reverse rank order:
+
+        u1, rank 1, P1     -> A, IN_SERVICE
+        u2, rank 2, P1     -> A, WAITING
+        u3, rank 3, B_ONLY -> B, IN_SERVICE
+
+    The test stops immediately after Phase 5 at t=0.
+    No service completion, routing continuation or run() is invoked.
+    """
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(
+        env,
+        station_id="A",
+    )
+    station_b = AOnlyCoordinatedStation(
+        env,
+        station_id="B",
+    )
+
+    log = EventLog(run_id="AB_ENTRY_FLOW_INTEGRATION")
+
+    # Deliberately reverse the station dictionary order.
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={
+            "B": station_b,
+            "A": station_a,
+        },
+        event_log=log,
+    )
+
+    u1 = PatientAgent(
+        patient_id="u1",
+        patient_rank=1,
+        package=P1_CONFIG,
+    )
+    u2 = PatientAgent(
+        patient_id="u2",
+        patient_rank=2,
+        package=P1_CONFIG,
+    )
+    u3 = PatientAgent(
+        patient_id="u3",
+        patient_rank=3,
+        package=B_ONLY,
+    )
+
+    # ------------------------------------------------------
+    # Registration only: reverse order u3 -> u2 -> u1.
+    # ------------------------------------------------------
+
+    for patient in (u3, u2, u1):
+        coordinator.register_arrival(
+            ScheduledArrival(
+                at=0.0,
+                patient=patient,
+            )
+        )
+
+    assert env.now == 0.0
+    assert log.records == []
+
+    assert [
+        arrival.patient
+        for arrival in coordinator.pending_arrivals
+    ] == [u3, u2, u1]
+
+    for patient in (u1, u2, u3):
+        assert patient.state == PatientState.ARRIVED
+        assert patient.location == "ENTRY"
+        assert patient.completed_tests == set()
+
+    # No station work or resource ownership before admission.
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.queue == []
+
+    # ------------------------------------------------------
+    # Phase 0-2: process only the t=0 event bucket.
+    # ------------------------------------------------------
+
+    assert coordinator.next_event_time() == 0.0
+
+    bucket = env.process(
+        coordinator.process_next_event_bucket()
+    )
+
+    # IMPORTANT: run only until this Process completes.
+    # Do not call env.run(until=3) or env.run(until=4).
+    env.run(until=bucket)
+
+    assert bucket.triggered
+    assert env.now == 0.0
+
+    released, arrived = bucket.value
+
+    # There were no active services before t=0.
+    assert released == []
+
+    # Phase 2 must use rank/ID, not registration order.
+    assert len(arrived) == 3
+    assert arrived[0] is u1
+    assert arrived[1] is u2
+    assert arrived[2] is u3
+
+    assert coordinator.pending_arrivals == []
+
+    assert [
+        (record.phase, record.patient_id, record.event_type)
+        for record in log.records
+    ] == [
+        (2, "u1", "ARRIVAL"),
+        (2, "u2", "ARRIVAL"),
+        (2, "u3", "ARRIVAL"),
+    ]
+
+    for patient in (u1, u2, u3):
+        assert patient.state == PatientState.ARRIVED
+        assert patient.location == "ENTRY"
+
+    # ------------------------------------------------------
+    # Phase 3: synchronous zero-time ENTRY travel.
+    # ------------------------------------------------------
+
+    ready = coordinator.route_entry_arrivals(arrived)
+
+    assert len(ready) == 3
+    assert ready[0] is u1
+    assert ready[1] is u2
+    assert ready[2] is u3
+
+    assert env.now == 0.0
+
+    assert u1.location == "A"
+    assert u2.location == "A"
+    assert u3.location == "B"
+
+    for patient in (u1, u2, u3):
+        assert patient.state == PatientState.TRAVELLING
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+
+    # Every TRAVEL_END must have a matching ready record.
+    assert set(coordinator._ready_for_queue) == {
+        "u1",
+        "u2",
+        "u3",
+    }
+
+    for patient in (u1, u2, u3):
+        entry = coordinator._ready_for_queue[
+            patient.patient_id
+        ]
+
+        assert entry.patient is patient
+        assert entry.station_id == patient.location
+        assert entry.travel_ended_at == 0.0
+
+    # Movement alone does not enter queues or occupy Resources.
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+    # ------------------------------------------------------
+    # Phase 4: unified queue entry, A then B.
+    # ------------------------------------------------------
+
+    # Deliberately reverse Phase 4 input as well.
+    queued = coordinator.commit_queue_entries(
+        list(reversed(ready))
+    )
+
+    # Station A first, then B; rank/ID within each station.
+    assert len(queued) == 3
+    assert queued[0] is u1
+    assert queued[1] is u2
+    assert queued[2] is u3
+
+    assert env.now == 0.0
+
+    assert coordinator._ready_for_queue == {}
+
+    for patient in (u1, u2, u3):
+        assert patient.state == PatientState.WAITING
+        assert patient.active_visit_id is not None
+        assert patient.active_station_id == patient.location
+
+    assert [
+        visit.patient
+        for visit in station_a.waiting
+    ] == [u1, u2]
+
+    assert [
+        visit.patient
+        for visit in station_b.waiting
+    ] == [u3]
+
+    # All waiting visits entered the domain queue at t=0.
+    for visit in station_a.waiting + station_b.waiting:
+        assert visit.entered_at == 0.0
+
+    # Phase 4 does not request SimPy Resource capacity.
+    assert station_a.resource.count == 0
+    assert station_b.resource.count == 0
+
+    assert station_a.resource.users == []
+    assert station_b.resource.users == []
+
+    assert station_a.resource.queue == []
+    assert station_b.resource.queue == []
+
+    # ------------------------------------------------------
+    # Phase 5: explicit, independent service dispatch.
+    # ------------------------------------------------------
+
+    coordinator.dispatch_available_services()
+
+    # The simulation is still at t=0.
+    assert env.now == 0.0
+
+    # A: u1 starts first (FCFS), u2 stays in domain queue.
+    assert u1.state == PatientState.IN_SERVICE
+    assert u1.location == "A"
+
+    assert u2.state == PatientState.WAITING
+    assert u2.location == "A"
+
+    # B: u3 starts service immediately.
+    assert u3.state == PatientState.IN_SERVICE
+    assert u3.location == "B"
+
+    assert u1.completed_tests == set()
+    assert u2.completed_tests == set()
+    assert u3.completed_tests == set()
+
+    # Verify exact domain waiting-queue contents.
+    assert len(station_a.waiting) == 1
+    assert station_a.waiting[0].patient is u2
+    assert station_a.waiting[0].entered_at == 0.0
+
+    assert station_b.waiting == []
+
+    # Verify exact active service ownership.
+    assert len(station_a.active) == 1
+    assert len(station_b.active) == 1
+
+    active_a = next(iter(station_a.active.values()))
+    active_b = next(iter(station_b.active.values()))
+
+    assert active_a.patient is u1
+    assert active_b.patient is u3
+
+    # A lasts 4 time units; B lasts 3 time units.
+    # They have STARTED, not completed.
+    assert active_a.ends_at == 4.0
+    assert active_b.ends_at == 3.0
+
+    assert u1.active_station_id == "A"
+    assert u2.active_station_id == "A"
+    assert u3.active_station_id == "B"
+
+    assert u1.active_visit_id is not None
+    assert u2.active_visit_id is not None
+    assert u3.active_visit_id is not None
+
+    # Each station has capacity 1 and exactly one active service.
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    assert len(station_a.resource.users) == 1
+    assert len(station_b.resource.users) == 1
+
+    assert station_a.resource.users[0] is active_a.request
+    assert station_b.resource.users[0] is active_b.request
+
+    # Native SimPy queues must remain empty.
+    # u2 waits in station_a.waiting, NOT Resource.queue.
+    assert station_a.resource.queue == []
+    assert station_b.resource.queue == []
+
+    assert station_a.peak_resource_count == 1
+    assert station_b.peak_resource_count == 1
+
+    assert station_a.release_count == 0
+    assert station_b.release_count == 0
+
+    # ------------------------------------------------------
+    # Exact RAW EventLog append order.
+    # No sorting or phase regrouping is allowed.
+    # ------------------------------------------------------
+
+    actual_raw = [
+        (
+            record.phase,
+            record.patient_id,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+    ]
+
+    expected_raw = [
+        # Phase 2: all three arrivals.
+        (2, "u1", "ARRIVAL", None),
+        (2, "u2", "ARRIVAL", None),
+        (2, "u3", "ARRIVAL", None),
+
+        # Phase 3: routing and travel starts, rank/ID order.
+        (3, "u1", "NEEDS_ROUTING", None),
+        (3, "u1", "DECIDING", None),
+        (3, "u1", "ROUTE_DECISION", None),
+        (3, "u1", "TRAVEL_START", "A"),
+
+        (3, "u2", "NEEDS_ROUTING", None),
+        (3, "u2", "DECIDING", None),
+        (3, "u2", "ROUTE_DECISION", None),
+        (3, "u2", "TRAVEL_START", "A"),
+
+        (3, "u3", "NEEDS_ROUTING", None),
+        (3, "u3", "DECIDING", None),
+        (3, "u3", "ROUTE_DECISION", None),
+        (3, "u3", "TRAVEL_START", "B"),
+
+        # Phase 3: all zero-time travel completions.
+        (3, "u1", "TRAVEL_END", "A"),
+        (3, "u2", "TRAVEL_END", "A"),
+        (3, "u3", "TRAVEL_END", "B"),
+
+        # Phase 4: all domain queue entries, A then B.
+        (4, "u1", "QUEUE_ENTRY", "A"),
+        (4, "u2", "QUEUE_ENTRY", "A"),
+        (4, "u3", "QUEUE_ENTRY", "B"),
+
+        # Phase 5: only available services start.
+        (5, "u1", "SERVICE_START", "A"),
+        (5, "u3", "SERVICE_START", "B"),
+    ]
+
+    raw_log = "\n".join(
+        f"seq={r.sequence_id} "
+        f"time={r.sim_time:g} "
+        f"phase={r.phase} "
+        f"patient={r.patient_id} "
+        f"event={r.event_type} "
+        f"station={r.station_id}"
+        for r in log.records
+    )
+
+    assert actual_raw == expected_raw, (
+        f"Expected raw events:\n{expected_raw!r}\n"
+        f"Actual raw events:\n{actual_raw!r}\n"
+        f"Full EventLog:\n{raw_log}"
+    )
+
+    # All records belong to this same t=0 bucket.
+    assert len(log.records) == 23
+    assert all(
+        record.sim_time == 0.0
+        for record in log.records
+    )
+
+    assert [
+        record.sequence_id
+        for record in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+    # The four used phases are strictly nondecreasing.
+    assert [
+        record.phase
+        for record in log.records
+    ] == (
+        [2] * 3
+        + [3] * 15
+        + [4] * 3
+        + [5] * 2
+    )
+
+    # Verify event counts independently of expected_raw.
+    assert sum(
+        r.event_type == "ARRIVAL"
+        for r in log.records
+    ) == 3
+
+    assert sum(
+        r.event_type == "TRAVEL_END"
+        for r in log.records
+    ) == 3
+
+    assert sum(
+        r.event_type == "QUEUE_ENTRY"
+        for r in log.records
+    ) == 3
+
+    assert sum(
+        r.event_type == "SERVICE_START"
+        for r in log.records
+    ) == 2
+
+    # Verify individual TRAVEL_END -> QUEUE_ENTRY linkage.
+    travel_ends = {
+        r.patient_id: r
+        for r in log.records
+        if r.event_type == "TRAVEL_END"
+    }
+
+    queue_entries = {
+        r.patient_id: r
+        for r in log.records
+        if r.event_type == "QUEUE_ENTRY"
+    }
+
+    assert set(travel_ends) == {"u1", "u2", "u3"}
+    assert set(queue_entries) == {"u1", "u2", "u3"}
+
+    for patient_id in ("u1", "u2", "u3"):
+        travel_end = travel_ends[patient_id]
+        queue_entry = queue_entries[patient_id]
+
+        assert travel_end.sim_time == queue_entry.sim_time
+        assert travel_end.station_id == queue_entry.station_id
+        assert travel_end.sequence_id < queue_entry.sequence_id
+
+    # No service completion or release is allowed in this test.
+    assert not [
+        r for r in log.records
+        if r.event_type in (
+            "SERVICE_END",
+            "RESOURCE_RELEASE",
+            "DEPARTURE",
+        )
+    ]
+
+    # The next scheduled event is B's completion at t=3,
+    # but the integration test stops at t=0.
+    assert coordinator.next_event_time() == 3.0
+    assert env.now == 0.0
