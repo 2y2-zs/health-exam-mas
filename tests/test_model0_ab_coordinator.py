@@ -2746,3 +2746,493 @@ def test_next_event_time_none_does_not_mean_simulation_drained():
         assert station.release_count == 0
 
     # A waiting patient still exists: None is NOT a completion signal.
+
+# ==========================================================
+# Unified event-bucket generator tests: Phase 0-2 only
+# ==========================================================
+
+
+def test_process_next_event_bucket_arrival_before_service():
+    """Arrival@2 precedes A service completion@4.
+
+    The first bucket processes only Phase 2 at t=2.
+    The second bucket processes A Phase 0/1 at t=4.
+    """
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+
+    log = EventLog(run_id="AB_BUCKET_ARRIVAL_FIRST")
+
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={
+            "B": station_b,
+            "A": station_a,
+        },
+        event_log=log,
+    )
+
+    service_patient = PatientAgent(
+        "service",
+        2,
+        A_ONLY,
+    )
+    arrival_patient = PatientAgent(
+        "arrival",
+        1,
+        B_ONLY,
+    )
+
+    # Start A's [0,4) service as an existing component fixture.
+    service_patient.location = "A"
+    service_patient.state = PatientState.TRAVELLING
+
+    station_a.enqueue(service_patient, log)
+    station_a.start_available(log)
+
+    assert service_patient.state == PatientState.IN_SERVICE
+    assert coordinator.next_service_completion_time() == 4.0
+
+    plan = ScheduledArrival(
+        at=2.0,
+        patient=arrival_patient,
+    )
+    coordinator.register_arrival(plan)
+
+    assert coordinator.next_event_time() == 2.0
+
+    # First invocation: only the next event bucket.
+    first = env.process(
+        coordinator.process_next_event_bucket()
+    )
+
+    env.run(until=first)
+
+    assert first.triggered
+    assert env.now == 2.0
+
+    released, arrived = first.value
+
+    assert released == []
+    assert len(arrived) == 1
+    assert arrived[0] is arrival_patient
+
+    # Arrival is committed, but the patient is not yet routed.
+    assert coordinator.pending_arrivals == []
+    assert arrival_patient.state == PatientState.ARRIVED
+    assert arrival_patient.location == "ENTRY"
+    assert arrival_patient.completed_tests == set()
+
+    # A's service is still active and ends at t=4.
+    assert service_patient.state == PatientState.IN_SERVICE
+    assert service_patient.completed_tests == set()
+
+    assert station_a.resource.count == 1
+    assert len(station_a.active) == 1
+    assert station_a.release_count == 0
+
+    assert station_b.waiting == []
+    assert station_b.active == {}
+    assert station_b.resource.count == 0
+
+    # The original log must contain no premature service completion.
+    assert [
+        (
+            record.sim_time,
+            record.phase,
+            record.patient_id,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+    ] == [
+        (0.0, 4, "service", "QUEUE_ENTRY", "A"),
+        (0.0, 5, "service", "SERVICE_START", "A"),
+        (2.0, 2, "arrival", "ARRIVAL", None),
+    ]
+
+    assert coordinator.next_event_time() == 4.0
+
+    # Second invocation: now finish A's service at t=4.
+    second = env.process(
+        coordinator.process_next_event_bucket()
+    )
+
+    env.run(until=second)
+
+    assert second.triggered
+    assert env.now == 4.0
+
+    released, arrived = second.value
+
+    assert len(released) == 1
+    assert released[0] is service_patient
+    assert arrived == []
+
+    assert service_patient.state == PatientState.FINISHED
+    assert service_patient.completed_tests == {"A"}
+
+    assert station_a.active == {}
+    assert station_a.resource.count == 0
+    assert station_a.release_count == 1
+
+    # Exact original append order across both event buckets.
+    assert [
+        (
+            record.sim_time,
+            record.phase,
+            record.patient_id,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+    ] == [
+        (0.0, 4, "service", "QUEUE_ENTRY", "A"),
+        (0.0, 5, "service", "SERVICE_START", "A"),
+        (2.0, 2, "arrival", "ARRIVAL", None),
+        (4.0, 0, "service", "SERVICE_END", "A"),
+        (4.0, 1, "service", "RESOURCE_RELEASE", "A"),
+    ]
+
+    assert coordinator.next_event_time() is None
+
+    assert not [
+        record
+        for record in log.records
+        if record.event_type == "DEPARTURE"
+    ]
+
+
+def test_process_next_event_bucket_same_time_global_phase_order():
+    """A/B completions and three arrivals share t=4.
+
+    Expected raw ordering:
+        SERVICE_END A
+        SERVICE_END B
+        RESOURCE_RELEASE A
+        RESOURCE_RELEASE B
+        ARRIVAL z0
+        ARRIVAL z1
+        ARRIVAL z2
+
+    Arrival ordering uses rank, then patient_id.
+    """
+
+    (
+        env,
+        coordinator,
+        station_a,
+        station_b,
+        log,
+        patient_a,
+        patient_b,
+    ) = prepare_ab_services_ending_at_t4()
+
+    assert env.now == 1.0
+
+    # Two arrivals share rank=1; IDs break the tie.
+    z2 = PatientAgent("z2", 2, A_ONLY)
+    z1 = PatientAgent("z1", 1, B_ONLY)
+    z0 = PatientAgent("z0", 1, A_ONLY)
+
+    future = PatientAgent("future", 3, B_ONLY)
+
+    plan_z2 = ScheduledArrival(4.0, z2)
+    plan_z1 = ScheduledArrival(4.0, z1)
+    plan_z0 = ScheduledArrival(4.0, z0)
+    future_plan = ScheduledArrival(6.0, future)
+
+    # Deliberately use reverse order for the due arrivals.
+    coordinator.register_arrival(plan_z2)
+    coordinator.register_arrival(future_plan)
+    coordinator.register_arrival(plan_z1)
+    coordinator.register_arrival(plan_z0)
+
+    assert coordinator.next_event_time() == 4.0
+
+    process = env.process(
+        coordinator.process_next_event_bucket()
+    )
+
+    env.run(until=process)
+
+    assert process.triggered
+    assert env.now == 4.0
+
+    released, arrived = process.value
+
+    # Phase 0/1 releases are returned in A -> B order.
+    assert len(released) == 2
+    assert released[0] is patient_a
+    assert released[1] is patient_b
+
+    # Phase 2 arrivals are returned by rank then ID.
+    assert len(arrived) == 3
+    assert arrived[0] is z0
+    assert arrived[1] is z1
+    assert arrived[2] is z2
+
+    # Compare the ENTIRE original EventLog append order.
+    # Do not sort the log for this assertion.
+    actual_raw = [
+        (
+            record.sim_time,
+            record.phase,
+            record.patient_id,
+            record.event_type,
+            record.station_id,
+        )
+        for record in log.records
+    ]
+
+    expected_raw = [
+        (0.0, 4, "uA", "QUEUE_ENTRY", "A"),
+        (0.0, 5, "uA", "SERVICE_START", "A"),
+
+        (1.0, 4, "uB", "QUEUE_ENTRY", "B"),
+        (1.0, 5, "uB", "SERVICE_START", "B"),
+
+        (4.0, 0, "uA", "SERVICE_END", "A"),
+        (4.0, 0, "uB", "SERVICE_END", "B"),
+
+        (4.0, 1, "uA", "RESOURCE_RELEASE", "A"),
+        (4.0, 1, "uB", "RESOURCE_RELEASE", "B"),
+
+        (4.0, 2, "z0", "ARRIVAL", None),
+        (4.0, 2, "z1", "ARRIVAL", None),
+        (4.0, 2, "z2", "ARRIVAL", None),
+    ]
+
+    assert actual_raw == expected_raw
+
+    # All service ends precede every release;
+    # every release precedes every ARRIVAL.
+    t4 = [
+        record
+        for record in log.records
+        if record.sim_time == 4.0
+    ]
+
+    assert [record.phase for record in t4] == [
+        0, 0, 1, 1, 2, 2, 2,
+    ]
+
+    assert [record.event_type for record in t4] == [
+        "SERVICE_END",
+        "SERVICE_END",
+        "RESOURCE_RELEASE",
+        "RESOURCE_RELEASE",
+        "ARRIVAL",
+        "ARRIVAL",
+        "ARRIVAL",
+    ]
+
+    assert [
+        record.sequence_id
+        for record in log.records
+    ] == list(range(1, len(log.records) + 1))
+
+    # Original A and B services are fully released.
+    assert patient_a.state == PatientState.FINISHED
+    assert patient_a.completed_tests == {"A"}
+
+    assert patient_b.state == PatientState.FINISHED
+    assert patient_b.completed_tests == {"B"}
+
+    for station in (station_a, station_b):
+        assert station.active == {}
+        assert station.waiting == []
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 1
+
+    # The newly arrived patients have not routed or queued.
+    for patient in (z0, z1, z2, future):
+        assert patient.state == PatientState.ARRIVED
+        assert patient.location == "ENTRY"
+        assert patient.completed_tests == set()
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+
+    # The future arrival is not consumed.
+    assert len(coordinator.pending_arrivals) == 1
+    assert coordinator.pending_arrivals[0] is future_plan
+
+    assert coordinator.next_event_time() == 6.0
+
+    # Repeating the same bucket would find the future event;
+    # there is no duplicate ARRIVAL at t=4.
+    assert len([
+        record
+        for record in log.records
+        if record.event_type == "ARRIVAL"
+    ]) == 3
+
+    # No Phase 3, 4 or 5 events are generated by the bucket method.
+    assert not [
+        record
+        for record in log.records
+        if record.event_type in (
+            "ROUTE_DECISION",
+            "TRAVEL_START",
+            "TRAVEL_END",
+            "DEPARTURE",
+        )
+    ]
+
+
+def test_process_next_event_bucket_event_due_now():
+    """Due-now arrival is committed without moving the clock."""
+
+    env = simpy.Environment()
+    env.run(until=4.0)
+
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+
+    log = EventLog(run_id="AB_BUCKET_DUE_NOW")
+
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={
+            "A": station_a,
+            "B": station_b,
+        },
+        event_log=log,
+    )
+
+    patient = PatientAgent("u1", 1, A_ONLY)
+    arrival = ScheduledArrival(4.0, patient)
+
+    coordinator.register_arrival(arrival)
+
+    assert env.now == 4.0
+    assert coordinator.next_event_time() == 4.0
+
+    process = env.process(
+        coordinator.process_next_event_bucket()
+    )
+
+    env.run(until=process)
+
+    assert process.triggered
+    assert env.now == 4.0
+
+    released, arrived = process.value
+
+    assert released == []
+    assert len(arrived) == 1
+    assert arrived[0] is patient
+
+    assert coordinator.pending_arrivals == []
+
+    assert [
+        (
+            record.sim_time,
+            record.phase,
+            record.patient_id,
+            record.event_type,
+        )
+        for record in log.records
+    ] == [
+        (4.0, 2, "u1", "ARRIVAL"),
+    ]
+
+    assert patient.state == PatientState.ARRIVED
+    assert patient.location == "ENTRY"
+    assert patient.completed_tests == set()
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+    # A second invocation has no scheduled event.
+    second = env.process(
+        coordinator.process_next_event_bucket()
+    )
+
+    env.run(until=second)
+
+    assert second.value == ([], [])
+    assert env.now == 4.0
+    assert len(log.records) == 1
+
+
+def test_process_next_event_bucket_no_scheduled_event():
+    """No event returns two empty lists, even with waiting work."""
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+
+    log = EventLog(run_id="AB_BUCKET_NO_EVENT")
+
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={
+            "A": station_a,
+            "B": station_b,
+        },
+        event_log=log,
+    )
+
+    assert coordinator.next_event_time() is None
+
+    # A patient can remain waiting even when there is no scheduled
+    # arrival or active service completion.
+    patient = PatientAgent("waiting", 1, A_ONLY)
+
+    patient.location = "A"
+    patient.state = PatientState.TRAVELLING
+
+    station_a.enqueue(patient, log)
+
+    assert patient.state == PatientState.WAITING
+    assert len(station_a.waiting) == 1
+    assert station_a.active == {}
+
+    assert coordinator.next_event_time() is None
+
+    records_before = list(log.records)
+    waiting_before = list(station_a.waiting)
+
+    process = env.process(
+        coordinator.process_next_event_bucket()
+    )
+
+    env.run(until=process)
+
+    assert process.triggered
+    assert process.value == ([], [])
+    assert env.now == 0
+
+    # No event or patient state was changed.
+    assert log.records == records_before
+    assert coordinator.pending_arrivals == []
+
+    assert station_a.waiting == waiting_before
+    assert station_a.waiting[0].patient is patient
+
+    assert patient.state == PatientState.WAITING
+    assert patient.location == "A"
+    assert patient.completed_tests == set()
+
+    assert station_a.active == {}
+    assert station_b.active == {}
+
+    for station in (station_a, station_b):
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 0
+
+    # The absence of scheduled events is not proof that the
+    # domain has no remaining work.
