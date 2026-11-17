@@ -229,18 +229,19 @@ class AOnlyCoordinatedStation:
         No yield occurs inside this method.
         """
 
-        released: list[PatientAgent] = []
+        # Validate the whole batch before changing any visit or resource.
+        visit_ids: set[str] = set()
+        for visit in due:
+            if visit.visit_id in visit_ids:
+                raise RuntimeError("Duplicate visit in release batch")
+            if self.active.get(visit.visit_id) is not visit:
+                raise RuntimeError("Visit was not active at release")
+            visit_ids.add(visit.visit_id)
 
+        released: list[PatientAgent] = []
         for visit in due:
             patient = visit.patient
-
-            if self.active.pop(
-                visit.visit_id,
-                None,
-            ) is not visit:
-                raise RuntimeError(
-                    "Visit was not active at release"
-                )
+            del self.active[visit.visit_id]
 
             # Release the Resource exactly once.
             self.resource.release(visit.request)
@@ -415,6 +416,17 @@ class AOnlyCoordinator:
                     "Patient must begin in ARRIVED state"
                 )
 
+        # Keep identities after their pending events have been consumed.
+        self._patients_by_id: dict[str, PatientAgent] = {}
+        initial_patients = [item.patient for item in self.pending]
+        initial_patients.extend(visit.patient for visit in station.active.values())
+        initial_patients.extend(visit.patient for visit in station.waiting)
+        for patient in initial_patients:
+            known = self._patients_by_id.get(patient.patient_id)
+            if known is not None and known is not patient:
+                raise ValueError("Patient ID belongs to another patient object")
+            self._patients_by_id[patient.patient_id] = patient
+
     def register_travel(
         self,
         travel: ScheduledTravel,
@@ -493,8 +505,15 @@ class AOnlyCoordinator:
                 "Patient already has a pending travel"
             )
 
-        # Append only after all checks pass.
+        known = self._patients_by_id.get(travel.patient.patient_id)
+        if known is not None and known is not travel.patient:
+            raise ValueError("Patient ID belongs to another patient object")
+        if any(item.patient is travel.patient for item in self.pending):
+            raise ValueError("Patient already has a pending arrival")
+
+        # Register only after every validation succeeds.
         self.pending_travels.append(travel)
+        self._patients_by_id[travel.patient.patient_id] = travel.patient
 
     def commit_due_travels(self) -> list[PatientAgent]:
         """Phase 3: commit due positive-duration travel completions.

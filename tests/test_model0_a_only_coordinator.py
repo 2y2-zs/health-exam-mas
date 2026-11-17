@@ -28,6 +28,7 @@ from health_exam_mas.model0 import (
 )
 
 from model0_a_only_prototype import (
+    ActiveVisit,
     AOnlyCoordinatedStation,
     AOnlyCoordinator,
     ScheduledArrival,
@@ -2258,3 +2259,190 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
         record.sequence_id
         for record in log.records
     ] == list(range(1, len(log.records) + 1))
+
+
+def prepare_b_travel(
+    *, patient_id="u1", patient_rank=1, arrivals=(), run_id="B_TRAVEL"
+):
+    """Prepare t=4 with B and a P1 patient who has completed A."""
+    env = simpy.Environment()
+    env.run(until=4.0)
+    assert env.now == 4.0
+    station = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id=run_id)
+    coordinator = AOnlyCoordinator(env, station, log, arrivals)
+    patient = PatientAgent(patient_id, patient_rank, P1_CONFIG)
+    patient.location = "A"
+    patient.state = PatientState.DECIDING
+    patient.completed_tests.add("A")
+    return env, station, log, coordinator, patient
+
+def assert_empty_station(station):
+    """Check queue/resource cleanup without requiring patient completion."""
+    assert station.waiting == []
+    assert station.active == {}
+    assert station.resource.count == 0
+    assert station.resource.users == []
+    assert station.resource.queue == []
+
+def patient_snapshot(patient):
+    return (
+        patient.state,
+        patient.location,
+        frozenset(patient.completed_tests),
+        patient.active_visit_id,
+        patient.active_station_id,
+    )
+
+@pytest.mark.parametrize("arrival_time", [5.0, 6.0])
+def test_travel_rejects_a_different_patient_with_an_arrival_id(arrival_time):
+    """A pending arrival owns its ID even when its time differs from travel end."""
+    entry_patient = PatientAgent("u1", 1, B_ONLY)
+    arrival = ScheduledArrival(at=arrival_time, patient=entry_patient)
+    env, station, log, coordinator, traveller = prepare_b_travel(
+        arrivals=[arrival], run_id="CROSS_SOURCE_PATIENT_ID"
+    )
+    assert traveller is not entry_patient
+    travel = ScheduledTravel(traveller, "A", "B", 4.0, 5.0)
+    before_entry = patient_snapshot(entry_patient)
+    before_traveller = patient_snapshot(traveller)
+
+    with pytest.raises(ValueError, match="Patient ID"):
+        coordinator.register_travel(travel)
+
+    assert env.now == 4.0
+    assert patient_snapshot(entry_patient) == before_entry
+    assert patient_snapshot(traveller) == before_traveller
+    assert coordinator.pending == [arrival]
+    assert coordinator.pending[0] is arrival
+    assert coordinator.pending_travels == []
+    assert log.records == []
+    assert_empty_station(station)
+    assert station.release_count == 0
+    assert station.peak_resource_count == 0
+
+@pytest.mark.parametrize("stage", ["after_travel", "after_service"])
+def test_patient_id_remains_owned_after_travel_or_service(stage):
+    """Consuming a travel plan or completing service must not free its patient ID."""
+    env, station, log, coordinator, patient = prepare_b_travel(run_id='PERSISTENT_PATIENT_ID')
+    travel = ScheduledTravel(patient, "A", "B", 4.0, 5.0)
+    coordinator.register_travel(travel)
+    transition_patient_state(
+        patient, log, env.now, "TRAVEL_START", PatientState.TRAVELLING,
+        station_id="B", phase=3,
+    )
+    env.run(until=5.0)
+    completed = coordinator.commit_due_travels()
+    assert completed == [patient]
+    assert completed[0] is patient
+    assert coordinator.pending_travels == []
+
+    if stage == "after_service":
+        # B service is [5, 8); only direct boundary methods are exercised here.
+        station.enqueue(patient, log)
+        station.start_available(log)
+        env.run(until=8.0)
+        due = station.close_services(log)
+        released = station.release_services(due, log)
+        assert released == [patient]
+        assert released[0] is patient
+        coordinator.commit_departures(released)
+        assert patient.state == PatientState.FINISHED
+        assert patient.completed_tests == {"A", "B"}
+    else:
+        assert patient.state == PatientState.TRAVELLING
+        assert patient.completed_tests == {"A"}
+
+    assert patient.location == "B"
+    assert_empty_station(station)
+
+    replacement = PatientAgent("u1", 2, P1_CONFIG)
+    replacement.location = "A"
+    replacement.state = PatientState.DECIDING
+    replacement.completed_tests.add("A")
+    next_travel = ScheduledTravel(replacement, 'A', 'B', env.now, env.now + 1.0)
+    before_patient = patient_snapshot(patient)
+    before_replacement = patient_snapshot(replacement)
+    before_log = list(log.records)
+    before_counts = (station.release_count, station.peak_resource_count)
+    before_time = env.now
+
+    with pytest.raises(ValueError, match="Patient ID"):
+        coordinator.register_travel(next_travel)
+
+    assert env.now == before_time
+    assert patient_snapshot(patient) == before_patient
+    assert patient_snapshot(replacement) == before_replacement
+    assert coordinator.pending == []
+    assert coordinator.pending_travels == []
+    assert log.records == before_log
+    assert (station.release_count, station.peak_resource_count) == before_counts
+    assert_empty_station(station)
+    assert_phase_contract(log.records)
+
+@pytest.mark.parametrize("invalid_batch", ["foreign_visit", "duplicate_visit"])
+def test_invalid_release_batch_preserves_all_active_visits(invalid_batch):
+    """Reject a bad batch before releasing its valid first visit."""
+    env = simpy.Environment()
+    station = AOnlyCoordinatedStation(env, station_id="C")
+    log = EventLog(run_id="RELEASE_BATCH_OWNERSHIP")
+    patients = [PatientAgent(f"u{rank}", rank, C_ONLY) for rank in (1, 2)]
+    for patient in patients:
+        patient.location = "C"
+        patient.state = PatientState.TRAVELLING
+        station.enqueue(patient, log)
+    station.start_available(log)
+    env.run(until=5.0)
+    due = station.close_services(log)
+    assert len(due) == 2
+
+    if invalid_batch == "foreign_visit":
+        original = due[1]
+        forged = ActiveVisit(
+            patient=original.patient,
+            visit_id=original.visit_id,
+            request=original.request,
+            ends_at=original.ends_at,
+        )
+        assert forged is not original
+        invalid = [due[0], forged]
+    else:
+        invalid = [due[0], due[0]]
+
+    before_active = dict(station.active)
+    before_users = list(station.resource.users)
+    before_patients = [patient_snapshot(patient) for patient in patients]
+    before_log = list(log.records)
+    before_counts = (station.release_count, station.peak_resource_count)
+
+    with pytest.raises(RuntimeError):
+        station.release_services(invalid, log)
+
+    assert env.now == 5.0
+    assert station.active.keys() == before_active.keys()
+    for visit_id, visit in before_active.items():
+        assert station.active[visit_id] is visit
+        assert visit.request in station.resource.users
+        assert visit.request.triggered
+    assert station.resource.users == before_users
+    assert station.resource.count == 2
+    assert station.resource.queue == []
+    assert station.waiting == []
+    assert [patient_snapshot(patient) for patient in patients] == before_patients
+    assert (station.release_count, station.peak_resource_count) == before_counts
+    assert log.records == before_log
+
+    # The original batch remains usable: both C services were [0, 5).
+    released = station.release_services(due, log)
+    assert len(released) == 2
+    assert all(actual is expected for actual, expected in zip(released, patients))
+    assert station.release_count == 2
+    assert station.peak_resource_count == 2
+    assert_empty_station(station)
+    for patient in patients:
+        assert patient.state == PatientState.FINISHED
+        assert patient.completed_tests == {"C"}
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+    assert not [record for record in log.records if record.event_type == "DEPARTURE"]
+    assert_phase_contract(log.records)
