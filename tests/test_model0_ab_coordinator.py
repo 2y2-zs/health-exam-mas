@@ -161,7 +161,7 @@ def test_ab_coordinator_rejects_different_environments(
 def test_ab_coordinator_rejects_station_id_mismatch(
     wrong_key,
 ):
-    """A dictionary key must match its Station's station_id."""
+    """A dictionary key must match the Station's station_id."""
 
     env = simpy.Environment()
 
@@ -2045,7 +2045,6 @@ def test_commit_due_arrivals_stable_order_and_future_preservation():
     arrival_u1 = ScheduledArrival(4.0, u1)
     arrival_u3 = ScheduledArrival(6.0, u3)
 
-    # Deliberately register the current-time patients in reverse rank order.
     coordinator.register_arrival(arrival_u2)
     coordinator.register_arrival(arrival_u3)
     coordinator.register_arrival(arrival_u1)
@@ -2063,11 +2062,9 @@ def test_commit_due_arrivals_stable_order_and_future_preservation():
     assert committed[0] is u1
     assert committed[1] is u2
 
-    # Only the future plan remains, preserving object identity.
     assert len(coordinator.pending_arrivals) == 1
     assert coordinator.pending_arrivals[0] is arrival_u3
 
-    # Original append order, never sorted for assertion.
     assert [
         (
             record.sim_time,
@@ -2096,7 +2093,6 @@ def test_commit_due_arrivals_stable_order_and_future_preservation():
 
     assert env.now == 4.0
 
-    # Phase 2 does not mutate either patient or admit either to a station.
     for patient in (u1, u2, u3):
         assert patient.state == PatientState.ARRIVED
         assert patient.location == "ENTRY"
@@ -2112,7 +2108,6 @@ def test_commit_due_arrivals_stable_order_and_future_preservation():
         assert station.resource.queue == []
         assert station.release_count == 0
 
-    # No second admission at the same simulation time.
     records_before = list(log.records)
 
     assert coordinator.commit_due_arrivals() == []
@@ -2120,7 +2115,6 @@ def test_commit_due_arrivals_stable_order_and_future_preservation():
     assert coordinator.pending_arrivals == [arrival_u3]
     assert env.now == 4.0
 
-    # Future work remains, but it has not been admitted.
     assert coordinator.next_service_completion_time() is None
 
 
@@ -2160,18 +2154,15 @@ def test_commit_due_arrivals_consumed_id_remains_reserved():
         (0.0, 2, "ARRIVAL"),
     ]
 
-    # Calling Phase 2 again cannot duplicate the event.
     before_log = list(log.records)
     assert coordinator.commit_due_arrivals() == []
     assert log.records == before_log
 
-    # A second plan with the SAME patient object is forbidden.
     same_patient_again = ScheduledArrival(1.0, patient)
 
     with pytest.raises(ValueError, match="Duplicate arrival"):
         coordinator.register_arrival(same_patient_again)
 
-    # A DIFFERENT patient object reusing the same ID is also forbidden.
     replacement = PatientAgent("u1", 99, B_ONLY)
     replacement_plan = ScheduledArrival(1.0, replacement)
 
@@ -2226,7 +2217,6 @@ def test_commit_due_arrivals_rejects_overdue_plan_without_mutation():
     coordinator.register_arrival(now_plan)
     coordinator.register_arrival(future_plan)
 
-    # Advance externally without committing the t=1 plan.
     env.run(until=3.0)
 
     pending_before = list(coordinator.pending_arrivals)
@@ -2250,7 +2240,6 @@ def test_commit_due_arrivals_rejects_overdue_plan_without_mutation():
         )
     )
 
-    # Even the patient due at t=3 has not partially arrived.
     for patient in (old_patient, now_patient, future_patient):
         assert patient.state == PatientState.ARRIVED
         assert patient.location == "ENTRY"
@@ -2295,7 +2284,6 @@ def test_commit_due_arrivals_prevalidates_full_batch():
     coordinator.register_arrival(invalid_plan)
     coordinator.register_arrival(future_plan)
 
-    # Deliberately invalidate the SECOND due patient.
     invalid_patient.state = PatientState.DECIDING
 
     pending_before = list(coordinator.pending_arrivals)
@@ -2307,7 +2295,6 @@ def test_commit_due_arrivals_prevalidates_full_batch():
     ):
         coordinator.commit_due_arrivals()
 
-    # No earlier valid patient was partially committed.
     assert env.now == 4.0
     assert log.records == records_before
 
@@ -2336,7 +2323,6 @@ def test_commit_due_arrivals_prevalidates_full_batch():
         assert station.resource.users == []
         assert station.resource.queue == []
 
-    # Repair the test fixture; the original batch can now be consumed.
     invalid_patient.state = PatientState.ARRIVED
 
     committed = coordinator.commit_due_arrivals()
@@ -2360,3 +2346,403 @@ def test_commit_due_arrivals_prevalidates_full_batch():
         (4.0, 2, "u1", "ARRIVAL"),
         (4.0, 2, "u2", "ARRIVAL"),
     ]
+
+
+# ==========================================================
+# New next_event_time() tests
+# ==========================================================
+
+
+def test_next_event_time_arrival_precedes_service_completion():
+    """Arrival@2 must win over active A service completion@4.
+
+    The query must not commit either event or advance time.
+    """
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id="AB_NEXT_EVENT_ARRIVAL_FIRST")
+
+    coordinator = MultiStationCoordinator(
+        env,
+        {"B": station_b, "A": station_a},
+        log,
+    )
+
+    service_patient = PatientAgent("service", 2, A_ONLY)
+    service_patient.location = "A"
+    service_patient.state = PatientState.TRAVELLING
+
+    station_a.enqueue(service_patient, log)
+    station_a.start_available(log)
+
+    assert coordinator.next_service_completion_time() == 4.0
+
+    arrival_patient = PatientAgent("arrival", 1, B_ONLY)
+    arrival = ScheduledArrival(
+        at=2.0,
+        patient=arrival_patient,
+    )
+
+    coordinator.register_arrival(arrival)
+
+    before_log = list(log.records)
+    before_active = dict(station_a.active)
+    before_users = list(station_a.resource.users)
+
+    assert coordinator.next_event_time() == 2.0
+    assert coordinator.next_event_time() == 2.0
+
+    assert env.now == 0
+    assert log.records == before_log
+
+    assert coordinator.pending_arrivals == [arrival]
+    assert coordinator.pending_arrivals[0] is arrival
+
+    assert station_a.active.keys() == before_active.keys()
+
+    for visit_id, visit in before_active.items():
+        assert station_a.active[visit_id] is visit
+        assert visit.ends_at == 4.0
+
+    assert station_a.resource.count == 1
+    assert station_a.resource.users == before_users
+    assert station_a.release_count == 0
+
+    assert service_patient.state == PatientState.IN_SERVICE
+    assert service_patient.completed_tests == set()
+
+    assert arrival_patient.state == PatientState.ARRIVED
+    assert arrival_patient.location == "ENTRY"
+    assert arrival_patient.completed_tests == set()
+
+    assert station_b.waiting == []
+    assert station_b.active == {}
+    assert station_b.resource.count == 0
+
+    # Even though the next event is at t=2, querying does not
+    # advance the simulation or record ARRIVAL.
+    assert not [
+        record
+        for record in log.records
+        if record.event_type == "ARRIVAL"
+    ]
+
+
+def test_next_event_time_tied_arrival_and_service_is_pure():
+    """Arrival@4 and both service completions@4 return 4 only."""
+
+    (
+        env,
+        coordinator,
+        station_a,
+        station_b,
+        log,
+        patient_a,
+        patient_b,
+    ) = prepare_ab_services_ending_at_t4()
+
+    assert env.now == 1.0
+
+    arrival_patient = PatientAgent("arrival", 3, A_ONLY)
+    arrival = ScheduledArrival(4.0, arrival_patient)
+
+    coordinator.register_arrival(arrival)
+
+    records_before = list(log.records)
+    active_a_before = dict(station_a.active)
+    active_b_before = dict(station_b.active)
+
+    assert coordinator.next_event_time() == 4.0
+    assert coordinator.next_event_time() == 4.0
+
+    assert env.now == 1.0
+    assert log.records == records_before
+    assert coordinator.pending_arrivals == [arrival]
+
+    # Reaching the due timestamp externally does not cause the
+    # pure query to execute Phase 0/1 or Phase 2.
+    env.run(until=4.0)
+
+    assert env.now == 4.0
+    assert coordinator.next_event_time() == 4.0
+
+    assert log.records == records_before
+    assert coordinator.pending_arrivals == [arrival]
+
+    for visit_id, visit in active_a_before.items():
+        assert station_a.active[visit_id] is visit
+
+    for visit_id, visit in active_b_before.items():
+        assert station_b.active[visit_id] is visit
+
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    assert station_a.release_count == 0
+    assert station_b.release_count == 0
+
+    assert patient_a.state == PatientState.IN_SERVICE
+    assert patient_b.state == PatientState.IN_SERVICE
+
+    assert arrival_patient.state == PatientState.ARRIVED
+    assert arrival_patient.location == "ENTRY"
+
+    # No new Phase 0, Phase 1, Phase 2 or later records.
+    assert not [
+        record
+        for record in log.records
+        if record.event_type in (
+            "SERVICE_END",
+            "RESOURCE_RELEASE",
+            "ARRIVAL",
+            "DEPARTURE",
+        )
+    ]
+
+
+def test_next_event_time_only_future_arrival():
+    """With no active service, Arrival@6 is still an event at t=6."""
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id="AB_NEXT_EVENT_ARRIVAL_ONLY")
+
+    coordinator = MultiStationCoordinator(
+        env,
+        {"A": station_a, "B": station_b},
+        log,
+    )
+
+    patient = PatientAgent("u1", 1, A_ONLY)
+    arrival = ScheduledArrival(6.0, patient)
+
+    coordinator.register_arrival(arrival)
+
+    assert coordinator.next_service_completion_time() is None
+
+    before_log = list(log.records)
+
+    assert coordinator.next_event_time() == 6.0
+    assert coordinator.next_event_time() == 6.0
+
+    assert env.now == 0
+    assert log.records == before_log
+
+    assert coordinator.pending_arrivals == [arrival]
+    assert coordinator.pending_arrivals[0] is arrival
+
+    assert patient.state == PatientState.ARRIVED
+    assert patient.location == "ENTRY"
+    assert patient.completed_tests == set()
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 0
+
+
+def test_next_event_time_rejects_overdue_arrival_without_mutation():
+    """An uncommitted Arrival@1 at t=2 must raise, even with due-now work."""
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id="AB_NEXT_EVENT_OVERDUE_ARRIVAL")
+
+    coordinator = MultiStationCoordinator(
+        env,
+        {"A": station_a, "B": station_b},
+        log,
+    )
+
+    old_patient = PatientAgent("old", 1, A_ONLY)
+    future_patient = PatientAgent("future", 2, B_ONLY)
+
+    old_plan = ScheduledArrival(1.0, old_patient)
+    future_plan = ScheduledArrival(5.0, future_patient)
+
+    coordinator.register_arrival(old_plan)
+    coordinator.register_arrival(future_plan)
+
+    env.run(until=2.0)
+
+    assert env.now == 2.0
+
+    pending_before = list(coordinator.pending_arrivals)
+    records_before = list(log.records)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Overdue pending arrival",
+    ):
+        coordinator.next_event_time()
+
+    assert env.now == 2.0
+    assert log.records == records_before
+
+    assert len(coordinator.pending_arrivals) == 2
+    assert all(
+        actual is expected
+        for actual, expected in zip(
+            coordinator.pending_arrivals,
+            pending_before,
+        )
+    )
+
+    for patient in (old_patient, future_patient):
+        assert patient.state == PatientState.ARRIVED
+        assert patient.location == "ENTRY"
+        assert patient.completed_tests == set()
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 0
+
+
+def test_next_event_time_rejects_overdue_service_without_mutation():
+    """An active service ending at t=4 is overdue at t=4.5.
+
+    A valid future arrival must not hide the overdue service.
+    """
+
+    (
+        env,
+        coordinator,
+        station_a,
+        station_b,
+        log,
+        patient_a,
+        patient_b,
+    ) = prepare_ab_services_ending_at_t4()
+
+    future_patient = PatientAgent("future", 3, A_ONLY)
+    future_plan = ScheduledArrival(6.0, future_patient)
+
+    coordinator.register_arrival(future_plan)
+
+    # Deliberately skip committing t=4 completions.
+    env.run(until=4.5)
+
+    assert env.now == 4.5
+
+    records_before = list(log.records)
+    pending_before = list(coordinator.pending_arrivals)
+
+    active_a_before = dict(station_a.active)
+    active_b_before = dict(station_b.active)
+
+    users_a_before = list(station_a.resource.users)
+    users_b_before = list(station_b.resource.users)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Overdue active service completion",
+    ):
+        coordinator.next_event_time()
+
+    assert env.now == 4.5
+    assert log.records == records_before
+
+    assert coordinator.pending_arrivals == pending_before
+    assert coordinator.pending_arrivals[0] is future_plan
+
+    for visit_id, visit in active_a_before.items():
+        assert station_a.active[visit_id] is visit
+        assert visit.ends_at == 4.0
+
+    for visit_id, visit in active_b_before.items():
+        assert station_b.active[visit_id] is visit
+        assert visit.ends_at == 4.0
+
+    assert station_a.resource.count == 1
+    assert station_b.resource.count == 1
+
+    assert station_a.resource.users == users_a_before
+    assert station_b.resource.users == users_b_before
+
+    assert station_a.release_count == 0
+    assert station_b.release_count == 0
+
+    assert patient_a.state == PatientState.IN_SERVICE
+    assert patient_b.state == PatientState.IN_SERVICE
+
+    assert patient_a.completed_tests == set()
+    assert patient_b.completed_tests == set()
+
+    assert future_patient.state == PatientState.ARRIVED
+    assert future_patient.location == "ENTRY"
+
+
+def test_next_event_time_none_does_not_mean_simulation_drained():
+    """No arrival or active service returns None even with a waiting patient."""
+
+    env = simpy.Environment()
+
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id="AB_NEXT_EVENT_NO_SCHEDULED_EVENT")
+
+    coordinator = MultiStationCoordinator(
+        env,
+        {"A": station_a, "B": station_b},
+        log,
+    )
+
+    # Truly empty scheduling sources.
+    assert coordinator.pending_arrivals == []
+    assert coordinator.next_service_completion_time() is None
+    assert coordinator.next_event_time() is None
+
+    # Populate a waiting queue without starting a service.
+    patient = PatientAgent("waiting", 1, A_ONLY)
+    patient.location = "A"
+    patient.state = PatientState.TRAVELLING
+
+    station_a.enqueue(patient, log)
+
+    assert patient.state == PatientState.WAITING
+    assert len(station_a.waiting) == 1
+    assert station_a.active == {}
+
+    records_before = list(log.records)
+    waiting_before = list(station_a.waiting)
+
+    # This still returns None, because neither of the two
+    # currently supported event sources has a scheduled event.
+    assert coordinator.next_event_time() is None
+    assert coordinator.next_event_time() is None
+
+    assert env.now == 0
+    assert log.records == records_before
+    assert coordinator.pending_arrivals == []
+
+    assert station_a.waiting == waiting_before
+    assert station_a.waiting[0].patient is patient
+
+    assert patient.state == PatientState.WAITING
+    assert patient.location == "A"
+    assert patient.completed_tests == set()
+
+    for station in (station_a, station_b):
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 0
+
+    # A waiting patient still exists: None is NOT a completion signal.

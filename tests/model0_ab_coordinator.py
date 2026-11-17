@@ -11,6 +11,7 @@ Current responsibilities:
 - Dispatch available services synchronously in Phase 5
 - Register arrivals with persistent patient-ID history
 - Commit due arrivals synchronously in Phase 2
+- Query the next event time across arrivals and service completions
 
 Routing, travel scheduling, departure processing and
 the unified six-phase run() loop are not implemented yet.
@@ -92,7 +93,7 @@ class MultiStationCoordinator:
             for station_id in self.station_ids
         }
 
-        # Pending work: consumed plans will be removed from this list.
+        # Pending work: consumed plans are removed from this list.
         self.pending_arrivals: list[ScheduledArrival] = []
 
         # Persistent arrival-registration history.
@@ -126,7 +127,6 @@ class MultiStationCoordinator:
                 f"{patient_id!r}"
             )
 
-        # Only after validation succeeds, commit the registration.
         self.pending_arrivals.append(arrival)
         self._registered_arrival_ids.add(patient_id)
 
@@ -143,8 +143,6 @@ class MultiStationCoordinator:
 
         now = self.env.now
 
-        # An unprocessed past arrival is a scheduling error.
-        # Never silently skip or retroactively record it.
         if any(
             arrival.at < now
             for arrival in self.pending_arrivals
@@ -208,8 +206,7 @@ class MultiStationCoordinator:
                     f"Patient {patient_id!r} already has an active visit"
                 )
 
-        # The entire batch is valid. Emit Phase 2 records in stable
-        # order, with no yield or other phase interleaving.
+        # Emit Phase 2 records in stable order, with no yield.
         for arrival in due:
             patient = arrival.patient
 
@@ -223,7 +220,6 @@ class MultiStationCoordinator:
             )
 
         # Consume only current-time plans; retain all future plans.
-        # The persistent ID registry is deliberately unchanged.
         self.pending_arrivals = [
             arrival
             for arrival in self.pending_arrivals
@@ -291,6 +287,44 @@ class MultiStationCoordinator:
 
         return earliest
 
+    def next_event_time(self) -> float | None:
+        """Pure query: earliest arrival or active service completion.
+
+        Compare pending_arrivals with active service end times.
+        Reject overdue pending arrivals and overdue active services.
+
+        This method does not advance env.now, consume plans, release
+        resources, change patients or append EventLog records.
+
+        None means neither event source currently has a scheduled
+        event. It does NOT mean the full simulation has finished.
+
+        Future travel events are not included yet.
+        """
+
+        now = self.env.now
+        candidates: list[float] = []
+
+        # Check ALL pending arrivals, not just the earliest one.
+        for arrival in self.pending_arrivals:
+            if arrival.at < now:
+                raise RuntimeError(
+                    "Overdue pending arrival"
+                )
+            candidates.append(arrival.at)
+
+        # Reuse the existing pure query. It independently checks
+        # every active visit for overdue service completion.
+        service_time = self.next_service_completion_time()
+
+        if service_time is not None:
+            candidates.append(service_time)
+
+        if not candidates:
+            return None
+
+        return min(candidates)
+
     def process_next_service_completion(self):
         """SimPy generator: process only the next service completion.
 
@@ -298,6 +332,10 @@ class MultiStationCoordinator:
         No active service returns [] without advancing time.
 
         Deliberately does not commit arrivals or dispatch Phase 5.
+
+        IMPORTANT:
+        This service-only component must not be used as a unified
+        event scheduler: an earlier pending arrival may exist.
         """
 
         next_time = self.next_service_completion_time()
