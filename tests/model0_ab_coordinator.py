@@ -6,16 +6,18 @@ Supported:
 - Phase 0/1: batch service completion and release
 - Phase 2: batch arrival commitment
 - Phase 3: validated zero-time entry routing and travel
+- Phase 4: atomic prevalidation and deterministic queue commitment
 - Phase 5: synchronous service dispatch
 - Service and arrival next-time queries
 - Component-only SimPy generators
 
 Not yet supported:
-- Phase 4 unified queue entry
 - Positive-duration travel in the unified coordinator
 - Phase 3 continuation after service release
 - Full six-phase run() loop
 """
+
+from dataclasses import dataclass
 
 import simpy
 
@@ -34,6 +36,15 @@ from model0_a_only_prototype import (
     AOnlyCoordinatedStation,
     ScheduledArrival,
 )
+
+
+@dataclass(frozen=True)
+class ReadyQueueEntry:
+    """A committed TRAVEL_END awaiting its Phase 4 QUEUE_ENTRY."""
+
+    patient: PatientAgent
+    station_id: str
+    travel_ended_at: float
 
 
 class MultiStationCoordinator:
@@ -102,6 +113,10 @@ class MultiStationCoordinator:
 
         # A patient may complete ENTRY travel only once.
         self._entry_routed_ids: set[str] = set()
+
+        # Phase 3 produces these ready records after TRAVEL_END.
+        # Phase 4 consumes each one exactly once.
+        self._ready_for_queue: dict[str, ReadyQueueEntry] = {}
 
     def register_arrival(
         self,
@@ -404,10 +419,140 @@ class MultiStationCoordinator:
             for patient, _ in planned_moves
         )
 
+        # Record the completed move only after all Phase 3 events.
+        # Phase 4 will verify the original patient, station and time.
+        for patient, destination in planned_moves:
+            self._ready_for_queue[patient.patient_id] = ReadyQueueEntry(
+                patient=patient,
+                station_id=destination,
+                travel_ended_at=self.env.now,
+            )
+
         return [
             patient
             for patient, _ in planned_moves
         ]
+
+    def commit_queue_entries(
+        self,
+        ready_patients: list[PatientAgent],
+    ) -> list[PatientAgent]:
+        """Phase 4: batch-enqueue completed travels, A then B.
+
+        Validate the ENTIRE batch without side effects before starting
+        any Station.enqueue call. Every patient must have a matching,
+        unconsumed TRAVEL_END ready record for the CURRENT time bucket.
+
+        Station.enqueue owns the WAITING state, visit ownership and
+        Phase 4 QUEUE_ENTRY log. This method never acquires Resource.
+        Phase 5 remains a separate explicit call.
+        """
+
+        now = self.env.now
+        station_order = {
+            station_id: index
+            for index, station_id in enumerate(self.station_ids)
+        }
+
+        # First pass: no patient state, queue, log or ready-record mutations.
+        seen_ids: set[str] = set()
+        validated: list[ReadyQueueEntry] = []
+
+        for patient in ready_patients:
+            patient_id = patient.patient_id
+
+            if patient_id in seen_ids:
+                raise ValueError(
+                    "Duplicate patient ID in Phase 4 queue batch: "
+                    f"{patient_id!r}"
+                )
+            seen_ids.add(patient_id)
+
+            if self._admitted_patients_by_id.get(patient_id) is not patient:
+                raise ValueError(
+                    f"Patient {patient_id!r} is not the "
+                    "original Phase 2 admitted object"
+                )
+
+            if patient_id not in self._entry_routed_ids:
+                raise ValueError(
+                    f"Patient {patient_id!r} has no "
+                    "completed Phase 3 entry travel"
+                )
+
+            ready = self._ready_for_queue.get(patient_id)
+            if ready is None:
+                raise ValueError(
+                    "No unconsumed TRAVEL_END ready record "
+                    f"for patient {patient_id!r}"
+                )
+            if ready.patient is not patient:
+                raise ValueError(
+                    "Ready record patient identity mismatch "
+                    f"for {patient_id!r}"
+                )
+
+            destination = ready.station_id
+            if destination not in self.stations:
+                raise ValueError(
+                    f"Queue destination {destination!r} "
+                    "is not managed by this A/B Coordinator"
+                )
+
+            if ready.travel_ended_at != now:
+                raise RuntimeError(
+                    f"TRAVEL_END time mismatch for {patient_id!r}: "
+                    f"recorded={ready.travel_ended_at}, now={now}"
+                )
+
+            if patient.state != PatientState.TRAVELLING:
+                raise ValueError(
+                    f"Patient {patient_id!r} must be TRAVELLING "
+                    "before Phase 4"
+                )
+            if patient.location != destination:
+                raise ValueError(
+                    f"Patient {patient_id!r} location "
+                    f"{patient.location!r} does not match "
+                    f"queue destination {destination!r}"
+                )
+            if (
+                patient.active_visit_id is not None
+                or patient.active_station_id is not None
+            ):
+                raise ValueError(
+                    f"Patient {patient_id!r} already has an active visit"
+                )
+
+            if destination not in eligible_stations(
+                patient.package, patient.completed_tests
+            ):
+                raise ValueError(
+                    f"Queue destination {destination!r} "
+                    f"is not eligible for patient {patient_id!r}"
+                )
+
+            validated.append(ready)
+
+        # Second pass: deterministic queue order. Do not sort EventLog.
+        validated.sort(
+            key=lambda ready: (
+                station_order[ready.station_id],
+                ready.patient.patient_rank,
+                ready.patient.patient_id,
+            )
+        )
+
+        committed: list[PatientAgent] = []
+        for ready in validated:
+            patient = ready.patient
+            self.stations[ready.station_id].enqueue(
+                patient, self.event_log
+            )
+            del self._ready_for_queue[patient.patient_id]
+            committed.append(patient)
+
+        return committed
 
     def complete_due_services(self) -> list[PatientAgent]:
         """Phase 0/1: commit all due completions before any release."""

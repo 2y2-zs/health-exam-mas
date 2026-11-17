@@ -16,7 +16,7 @@ from model0_a_only_prototype import (
     ScheduledArrival,
 )
 
-from model0_ab_coordinator import MultiStationCoordinator
+from model0_ab_coordinator import MultiStationCoordinator, ReadyQueueEntry
 
 
 A_ONLY = PackageConfig(
@@ -3688,3 +3688,267 @@ def test_route_entry_arrivals_requires_actual_phase2_admission():
         assert station.resource.count == 0
         assert station.resource.users == []
         assert station.resource.queue == []
+
+
+# ==========================================================
+# Phase 4: unified deterministic QUEUE_ENTRY
+# ==========================================================
+
+
+def test_commit_queue_entries_mixed_stations_stable_order():
+    """Station order A->B and rank/ID; no resource acquisition."""
+
+    env, coordinator, station_a, station_b, log = (
+        _make_ab_phase3_fixture()
+    )
+    env.run(until=4.0)
+
+    a2 = PatientAgent("a2", 2, P1_CONFIG)
+    b1 = PatientAgent("b1", 1, B_ONLY)
+    a1 = PatientAgent("a1", 1, P1_CONFIG)
+    a0 = PatientAgent("a0", 1, P1_CONFIG)
+
+    # Reverse mixed-station registration order.
+    for patient in (b1, a2, a1, a0):
+        coordinator.register_arrival(
+            ScheduledArrival(4.0, patient)
+        )
+
+    arrived = coordinator.commit_due_arrivals()
+    assert arrived == [a0, a1, b1, a2]
+
+    ready = coordinator.route_entry_arrivals(
+        list(reversed(arrived))
+    )
+    assert ready == [a0, a1, b1, a2]
+
+    assert {
+        patient_id: entry.station_id
+        for patient_id, entry in coordinator._ready_for_queue.items()
+    } == {
+        "a0": "A", "a1": "A", "a2": "A", "b1": "B",
+    }
+    assert all(
+        entry.travel_ended_at == 4.0
+        for entry in coordinator._ready_for_queue.values()
+    )
+
+    phase23_prefix = list(log.records)
+    committed = coordinator.commit_queue_entries(
+        list(reversed(ready))
+    )
+
+    assert committed == [a0, a1, a2, b1]
+    assert coordinator._ready_for_queue == {}
+    assert env.now == 4.0
+    assert log.records[:len(phase23_prefix)] == phase23_prefix
+
+    # Phase 4 records are kept in their actual append order.
+    queue_records = [
+        r for r in log.records if r.event_type == "QUEUE_ENTRY"
+    ]
+    assert [
+        (r.sim_time, r.phase, r.patient_id, r.station_id,
+         r.prior_state, r.new_state)
+        for r in queue_records
+    ] == [
+        (4.0, 4, "a0", "A", PatientState.TRAVELLING, PatientState.WAITING),
+        (4.0, 4, "a1", "A", PatientState.TRAVELLING, PatientState.WAITING),
+        (4.0, 4, "a2", "A", PatientState.TRAVELLING, PatientState.WAITING),
+        (4.0, 4, "b1", "B", PatientState.TRAVELLING, PatientState.WAITING),
+    ]
+
+    travel_ends = {
+        r.patient_id: r
+        for r in log.records if r.event_type == "TRAVEL_END"
+    }
+    assert len(travel_ends) == 4
+    for record in queue_records:
+        ending = travel_ends[record.patient_id]
+        assert record.sim_time == ending.sim_time
+        assert record.station_id == ending.station_id
+        assert ending.sequence_id < record.sequence_id
+
+    phase3 = [r for r in log.records if r.phase == 3]
+    assert phase3
+    assert max(r.sequence_id for r in phase3) < min(
+        r.sequence_id for r in queue_records
+    )
+
+    assert [v.patient for v in station_a.waiting] == [a0, a1, a2]
+    assert [v.patient for v in station_b.waiting] == [b1]
+    assert all(
+        v.entered_at == 4.0
+        for v in station_a.waiting + station_b.waiting
+    )
+    for patient in (a0, a1, a2, b1):
+        assert patient.state == PatientState.WAITING
+        assert patient.active_visit_id is not None
+        assert patient.active_station_id == patient.location
+
+    for station in (station_a, station_b):
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 0
+        assert station.peak_resource_count == 0
+
+    assert not [
+        r for r in log.records if r.event_type == "SERVICE_START"
+    ]
+    assert [r.sequence_id for r in log.records] == list(
+        range(1, len(log.records) + 1)
+    )
+    for before, after in zip(log.records, log.records[1:]):
+        assert before.sim_time <= after.sim_time
+        if before.sim_time == after.sim_time:
+            assert before.phase <= after.phase
+
+
+def test_commit_queue_entries_rejects_repeated_queue_commit():
+    """A consumed ready record cannot trigger a second QUEUE_ENTRY."""
+
+    env, coordinator, station_a, station_b, log = (
+        _make_ab_phase3_fixture()
+    )
+    patient = PatientAgent("u1", 1, P1_CONFIG)
+    coordinator.register_arrival(ScheduledArrival(0.0, patient))
+    arrived = coordinator.commit_due_arrivals()
+    ready = coordinator.route_entry_arrivals(arrived)
+    assert coordinator.commit_queue_entries(ready) == [patient]
+
+    assert patient.state == PatientState.WAITING
+    assert coordinator._ready_for_queue == {}
+    before = list(log.records)
+    waiting_before = list(station_a.waiting)
+
+    with pytest.raises(ValueError, match="No unconsumed TRAVEL_END"):
+        coordinator.commit_queue_entries([patient])
+
+    assert log.records == before
+    assert station_a.waiting == waiting_before
+    assert len([
+        r for r in log.records if r.event_type == "QUEUE_ENTRY"
+    ]) == 1
+    assert coordinator.commit_queue_entries([]) == []
+    assert log.records == before
+    assert env.now == 0.0
+    assert station_a.resource.count == 0
+    assert station_b.resource.count == 0
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "duplicate_object",
+        "duplicate_id_other_object",
+        "impostor",
+        "not_routed",
+        "wrong_state",
+        "wrong_location",
+        "active_visit",
+        "ineligible",
+        "bad_destination",
+        "stale_travel_end",
+    ],
+)
+def test_commit_queue_entries_invalid_batch_is_atomic(failure):
+    """Prevalidate all members: bad later item cannot enqueue first."""
+
+    env, coordinator, station_a, station_b, log = (
+        _make_ab_phase3_fixture()
+    )
+    a = PatientAgent("a", 1, P1_CONFIG)
+    b = PatientAgent("b", 2, B_ONLY)
+    c = PatientAgent("c", 3, P1_CONFIG)
+    for patient in (a, b, c):
+        coordinator.register_arrival(ScheduledArrival(0.0, patient))
+    arrived = coordinator.commit_due_arrivals()
+    assert arrived == [a, b, c]
+
+    ready = coordinator.route_entry_arrivals([a, b])
+    assert ready == [a, b]
+    batch = [a, b]
+
+    if failure == "duplicate_object":
+        batch = [a, b, a]
+        error = "Duplicate patient ID"
+    elif failure == "duplicate_id_other_object":
+        duplicate = PatientAgent("a", 99, P1_CONFIG)
+        batch = [a, b, duplicate]
+        error = "Duplicate patient ID"
+    elif failure == "impostor":
+        impostor = PatientAgent("b", 99, B_ONLY)
+        batch = [a, impostor]
+        error = "original Phase 2 admitted object"
+    elif failure == "not_routed":
+        batch = [a, c]
+        error = "no completed Phase 3 entry travel"
+    elif failure == "wrong_state":
+        b.state = PatientState.DECIDING
+        error = "must be TRAVELLING"
+    elif failure == "wrong_location":
+        b.location = "A"
+        error = "does not match queue destination"
+    elif failure == "active_visit":
+        b.active_visit_id = "unexpected-visit"
+        error = "already has an active visit"
+    elif failure == "ineligible":
+        b.completed_tests.add("B")
+        error = "not eligible"
+    elif failure == "bad_destination":
+        coordinator._ready_for_queue["b"] = ReadyQueueEntry(
+            patient=b, station_id="C", travel_ended_at=env.now
+        )
+        error = "not managed"
+    elif failure == "stale_travel_end":
+        env.run(until=1.0)
+        error = "TRAVEL_END time mismatch"
+    else:
+        raise AssertionError(f"Unknown failure case {failure!r}")
+
+    records_before = list(log.records)
+    pending_before = list(coordinator.pending_arrivals)
+    ready_before = dict(coordinator._ready_for_queue)
+    routed_ids_before = set(coordinator._entry_routed_ids)
+    patient_before = {
+        patient.patient_id: (
+            patient.state, patient.location,
+            set(patient.completed_tests),
+            patient.active_visit_id, patient.active_station_id,
+        )
+        for patient in (a, b, c)
+    }
+
+    with pytest.raises((ValueError, RuntimeError), match=error):
+        coordinator.commit_queue_entries(batch)
+
+    assert log.records == records_before
+    assert not [
+        r for r in log.records if r.event_type == "QUEUE_ENTRY"
+    ]
+    assert coordinator._ready_for_queue.keys() == ready_before.keys()
+    for patient_id, entry in ready_before.items():
+        assert coordinator._ready_for_queue[patient_id] is entry
+    assert coordinator._entry_routed_ids == routed_ids_before
+    assert coordinator.pending_arrivals == pending_before
+
+    for patient in (a, b, c):
+        assert (
+            patient.state, patient.location, patient.completed_tests,
+            patient.active_visit_id, patient.active_station_id,
+        ) == patient_before[patient.patient_id]
+
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 0
+        assert station.peak_resource_count == 0
+
+    assert env.now == (
+        1.0 if failure == "stale_travel_end" else 0.0
+    )
