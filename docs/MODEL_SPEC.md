@@ -68,7 +68,9 @@ A successful visit has a unique `(patient_id, station_id, visit_id)`. Each requi
 | 4 | Commit queue entries, ordered by `(queue_entry_time, patient_rank)` |
 | 5 | Dispatch idle station capacity FCFS and log service start |
 
-Within same phase, use stable station order **A,B,C** where applicable and fixed patient rank `u1 < u2 < u3 < ...`. Causal prerequisites always precede dependent actions. A waiting patient already queued at t'<t cannot be overtaken by a new t request. If a route/departure decision is enabled by a completion at t, it is processed only after phase 1 state commit.
+Causal prerequisites precede dependent actions. In Phase 3, first finish positive-duration travel due at t, then route newly admitted patients and complete their zero-time entry travel. Next record final departures and plan onward travel for continuing patients released in Phase 1. Use stable patient rank within each of these groups. Record events in commit order.
+
+In Phase 4, collect all patients ready to join a station at t across all travel sources. Commit station queues in **A,B,C** order and simultaneous entries at each station by patient rank. Patients already waiting keep their place. Phase 5 then dispatches available capacity from the head of each queue.
 
 **Implementation status:** The development branch has a coordinated prototype. Acceptance through the formal Model 0 entry point is pending. See [project progress](../PROJECT_PROGRESS.md) for evidence. Do **not** assume native SimPy event processing intrinsically obeys these hospital/domain phases. SimPy schedules events by time, priority and insertion order; native Resource request/release callbacks may execute in different micro-orders. A full six-phase coordinator is **not mandatory at project outset**. The student should choose and document the smallest correct event coordination approach, then demonstrate with T06 and other same-time tests that the **observable domain outcome AND event trace** meet the selected semantics. If simple native processes cannot enforce the intended contract, either explicitly revise the domain rule and rederive the expected traces **before experiments**, or add suitable coordination. Merely sorting logged events afterwards does not count.
 
@@ -80,7 +82,9 @@ Pre-run configuration checks:
 - unique existing station IDs, positive capacities, strictly positive service durations and nonnegative travel times;
 - each package contains valid station IDs; every fixed route is a no-duplicate permutation of its package;
 - all hard predecessor references are in scope, precedence graph is acyclic, and fixed route obeys its hard predecessors;
-- arrival times and cutoff are legal, patient ranks stable, consistent time units.
+- arrival times are finite and nonnegative and must be at or after the current simulation time at registration. A finite arrival beyond the intake cutoff remains a scheduled admission attempt. Patient ranks are stable and all times use the same unit.
+
+The coordinated run checks every preregistered package against its managed stations before processing the first event bucket. It checks the declared route independently of the routing decision made during the run.
 
 Record domain event log at minimum: `sim_time`, `phase` (or other verified event ordering marker), `sequence_id`, `patient_id`, `station_id`, `visit_id`, `event_type`, `prior_state`, `new_state`, `recommended_station`, `chosen_station`, `resource_token_or_server_id` (if applicable), `run_id`. `run_id` and wall-clock metadata must be excluded when comparing normalized traces for determinism.
 

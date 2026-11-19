@@ -28,14 +28,16 @@ These are development diagnostics using synthetic inputs. The student's acceptan
 
 | Work | Next evidence |
 | --- | --- |
-| Model 0 formal entry point and verification | For the deterministic fixture, create one environment and the A/B/C stations, register arrivals with `MultiStationCoordinator`, then run the coordinator and drain the environment. Confirm the Phase 3 ordering contract and the supported input checks below, then record student-led acceptance. |
+| Model 0 formal entry point and verification | For the deterministic fixture, create one environment and the A/B/C stations, register arrivals with `MultiStationCoordinator`, then run the coordinator and drain the environment. Record independent expected and actual traces for the coordinated path, including the mixed-source B case and the input checks below. |
 | Model 1 data source and scope decision | Confirm what operational data can be used with the supervisor. Record provenance for patient arrivals, packages, service durations, capacity and flow rules. If data access remains unresolved at the end of December, agree whether a literature-based scenario is suitable and document its assumptions and limits. See the [evidence register](docs/MODEL_ASSUMPTIONS.md#7-priority-evidence-gaps-and-mitigation). |
 | Interim Poster planning | [Course requirements and materials](poster/README.md) and [Gantt chart](poster/gantt.md). Use verified traces to demonstrate progress and explain the remaining same-time verification work. |
 
-### Open Model 0 checks
+### Phase ordering and input checks
 
-- **Phase 3 ordering.** With rank-2 P1 at t=0, A-to-B travel ends at t=5. Rank-1 P2 enters at t=5 and travels immediately to B. The raw log records the Phase 3 `TRAVEL_END` for P1 before P2, then Phase 4 queues P2 before P1. Confirm whether the Phase 3 contract applies rank across these sources or within explicitly ordered subgroups. Verify the resulting contract with the raw trace.
-- **Pre-run input checks.** The development path completed A and B for the malformed fixed route `(A, A, B)`, and registration accepted `NaN` and `inf` arrival times. The [configuration contract](docs/MODEL_SPEC.md#5-configuration-observation-and-logging-contracts) requires valid routes and legal times. Decide where to reject invalid configurations before admission and record negative-case evidence.
+- **Phase 3 ordering.** With rank-2 P1 at t=0, A-to-B travel ends at t=5. Rank-1 P2 enters at t=5 and travels immediately to B. The raw log records u2 then u1 for travel completion. Once both arrivals are ready, Phase 4 queues u1 then u2. The B service starts are u1 at t=5 and u2 at t=8. The [regression](tests/test_model0_coordinated_arrivals.py) checks these events in their original order.
+- **Pre-run input checks.** The coordinated entry rejects nonfinite or negative arrival times at registration. Before the first event bucket it checks every preregistered package for managed stations, a route containing each required station exactly once, and valid precedence edges in route order. An invalid future package leaves the clock, pending arrivals and log untouched. See the [configuration contract](docs/MODEL_SPEC.md#5-configuration-observation-and-logging-contracts).
+
+The 14 new development regression cases passed. The full development suite reported **160 passed and 2 failed**. The 11 coordinated T01–T10 checks passed and the two native failures described above remain open. Independent student acceptance is pending.
 
 ### Candidate Model 1 sources
 

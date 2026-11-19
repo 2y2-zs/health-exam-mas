@@ -77,6 +77,8 @@ Use **separate fresh environments** for negative and positive subcases.
 - **Finishes:** 8, 12, 16, 20.
 - **Key invariants:** I6, I8, I9.
 
+**Companion regression for mixed arrivals at B.** Let rank-2 u2 (P1) enter at t=0 and rank-1 u1 (P2) enter at t=5. Both reach B at t=5. In the raw log, the Phase 3 travel completions are u2 then u1. Phase 4 queue entries are u1 then u2. With B initially idle, u1 starts at t=5 and u2 at t=8. See [coordinated arrival checks](../tests/test_model0_coordinated_arrivals.py).
+
 ### T07 — final completion stops new requests
 
 - **Initial:** u1=P3, default A→B→C.

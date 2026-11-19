@@ -150,6 +150,8 @@ class MultiStationCoordinator:
     ) -> None:
         """Register an arrival plan, without admitting the patient."""
 
+        if not isfinite(arrival.at) or arrival.at < 0:
+            raise ValueError("Arrival time must be finite and nonnegative")
         if arrival.at < self.env.now:
             raise ValueError("Arrival time cannot be in the past")
 
@@ -1106,8 +1108,42 @@ class MultiStationCoordinator:
                 f"stations with pending work={busy_stations}"
             )
 
+    def _validate_pending_packages(self) -> None:
+        """Check every registered package before the first event bucket."""
+        for arrival in self.pending_arrivals:
+            patient = arrival.patient
+            package = patient.package
+            required = package.required_tests
+            route = package.fixed_route
+            unmanaged = required.difference(self.stations)
+            if unmanaged:
+                raise ValueError(
+                    f"Patient {patient.patient_id!r} requires unmanaged stations: "
+                    f"{sorted(unmanaged)}"
+                )
+
+            position = {station: index for index, station in enumerate(route)}
+            if len(position) != len(route) or position.keys() != required:
+                raise ValueError(
+                    f"Fixed route for {patient.patient_id!r} must be a "
+                    "permutation of the required stations"
+                )
+
+            for predecessor, successor in package.hard_precedence:
+                if predecessor not in required or successor not in required:
+                    raise ValueError(
+                        "Precedence references a station outside the package "
+                        f"for {patient.patient_id!r}: {predecessor!r} -> {successor!r}"
+                    )
+                if position[predecessor] >= position[successor]:
+                    raise ValueError(
+                        f"Fixed route for {patient.patient_id!r} violates "
+                        f"precedence: {predecessor!r} must precede {successor!r}"
+                    )
+
     def run(self):
         """Process complete time buckets for preregistered arrivals."""
+        self._validate_pending_packages()
         if self._ready_for_queue or self._pending_final_releases:
             raise RuntimeError(
                 f"Simulation stalled in an incomplete bucket at t={self.env.now}"
