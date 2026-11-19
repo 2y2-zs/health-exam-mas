@@ -6018,3 +6018,82 @@ def test_run_coordinated_t07_p3_departs_after_c_release():
         assert station.waiting == [] and station.active == {}
         assert station.resource.count == 0 and station.resource.queue == []
         assert station.release_count == 1
+
+
+def test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter():
+    """Drain three same-time C-only patients through the full coordinator."""
+    env = simpy.Environment()
+    stations = {
+        station_id: AOnlyCoordinatedStation(env, station_id=station_id)
+        for station_id in ("A", "B", "C")
+    }
+    log = EventLog(run_id="ABC_T03")
+    coordinator = MultiStationCoordinator(env, stations, log)
+    package = PackageConfig(
+        required_tests=frozenset({"C"}),
+        fixed_route=("C",),
+        hard_precedence=frozenset(),
+    )
+    patients = [PatientAgent(f"u{rank}", rank, package) for rank in (1, 2, 3)]
+    for patient in reversed(patients):
+        coordinator.register_arrival(ScheduledArrival(0.0, patient))
+
+    run = env.process(coordinator.run())
+    env.run()
+
+    assert run.triggered
+    assert env.now == 10.0
+    assert all(record.station_id in (None, "C") for record in log.records)
+
+    assert [
+        (record.patient_id, record.sim_time, record.station_id)
+        for record in log.records
+        if record.event_type == "TRAVEL_END"
+    ] == [("u1", 0.0, "C"), ("u2", 0.0, "C"), ("u3", 0.0, "C")]
+
+    # Omit entry routing details; retain every service and departure event.
+    entry_flow_events = {
+        "NEEDS_ROUTING", "DECIDING", "ROUTE_DECISION", "TRAVEL_START", "TRAVEL_END",
+    }
+    assert [
+        (
+            record.sim_time, record.phase, record.patient_id,
+            record.event_type, record.station_id,
+        )
+        for record in log.records
+        if record.sim_time != 0.0 or record.event_type not in entry_flow_events
+    ] == [
+        (0.0, 2, "u1", "ARRIVAL", None),
+        (0.0, 2, "u2", "ARRIVAL", None),
+        (0.0, 2, "u3", "ARRIVAL", None),
+        (0.0, 4, "u1", "QUEUE_ENTRY", "C"),
+        (0.0, 4, "u2", "QUEUE_ENTRY", "C"),
+        (0.0, 4, "u3", "QUEUE_ENTRY", "C"),
+        (0.0, 5, "u1", "SERVICE_START", "C"),
+        (0.0, 5, "u2", "SERVICE_START", "C"),
+        (5.0, 0, "u1", "SERVICE_END", "C"),
+        (5.0, 0, "u2", "SERVICE_END", "C"),
+        (5.0, 1, "u1", "RESOURCE_RELEASE", "C"),
+        (5.0, 1, "u2", "RESOURCE_RELEASE", "C"),
+        (5.0, 3, "u1", "DEPARTURE", None),
+        (5.0, 3, "u2", "DEPARTURE", None),
+        (5.0, 5, "u3", "SERVICE_START", "C"),
+        (10.0, 0, "u3", "SERVICE_END", "C"),
+        (10.0, 1, "u3", "RESOURCE_RELEASE", "C"),
+        (10.0, 3, "u3", "DEPARTURE", None),
+    ]
+
+    for patient in patients:
+        assert patient.state == PatientState.FINISHED
+        assert patient.completed_tests == {"C"}
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+
+    assert stations["C"].peak_resource_count == stations["C"].resource.capacity == 2
+    assert stations["C"].release_count == 3
+    assert stations["A"].release_count == stations["B"].release_count == 0
+    assert coordinator.pending_arrivals == coordinator.pending_travels == []
+    assert coordinator.next_event_time() is None
+    for station in stations.values():
+        assert station.waiting == [] and station.active == {}
+        assert station.resource.count == 0 and station.resource.queue == []
