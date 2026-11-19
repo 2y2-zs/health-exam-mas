@@ -1,6 +1,8 @@
 
 """Tests for A/B multi-station coordination components and boundaries."""
 
+from dataclasses import replace
+
 import pytest
 import simpy
 
@@ -3245,13 +3247,13 @@ def test_process_next_event_bucket_no_scheduled_event():
 from health_exam_mas.model0 import P1_CONFIG
 
 
-def _make_ab_phase3_fixture():
+def _make_ab_phase3_fixture(*, run_id: str = "AB_PHASE3_ENTRY"):
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
     station_b = AOnlyCoordinatedStation(env, station_id="B")
 
-    log = EventLog(run_id="AB_PHASE3_ENTRY")
+    log = EventLog(run_id=run_id)
 
     coordinator = MultiStationCoordinator(
         env=env,
@@ -5801,9 +5803,9 @@ def test_run_empty_ab_system_drains_without_events():
         assert station.resource.users == [] and station.resource.queue == []
 
 
-def test_run_coordinated_t06_serves_existing_waiter_first():
-    """Reproduce T06 with simultaneous A release and two arrivals at t=4."""
-    env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture()
+def _register_coordinated_t06_arrivals(
+    coordinator: MultiStationCoordinator,
+) -> dict[str, PatientAgent]:
     patients = {
         f"u{rank}": PatientAgent(f"u{rank}", rank, P1_CONFIG)
         for rank in range(1, 5)
@@ -5812,6 +5814,13 @@ def test_run_coordinated_t06_serves_existing_waiter_first():
         coordinator.register_arrival(
             ScheduledArrival(float(arrival_time), patients[patient_id])
         )
+    return patients
+
+
+def test_run_coordinated_t06_serves_existing_waiter_first():
+    """Reproduce T06 with simultaneous A release and two arrivals at t=4."""
+    env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture()
+    patients = _register_coordinated_t06_arrivals(coordinator)
 
     run = env.process(coordinator.run())
     env.run()
@@ -5885,3 +5894,37 @@ def test_run_coordinated_t06_serves_existing_waiter_first():
         assert station.waiting == [] and station.active == {}
         assert station.resource.count == 0 and station.resource.queue == []
         assert station.release_count == 4 and station.peak_resource_count == 1
+
+
+def test_run_coordinated_t10_reproduces_event_trace():
+    """Fresh runs of T06 produce identical ordered domain events."""
+    traces = []
+    for run_id in ("AB_T10_FIRST", "AB_T10_SECOND"):
+        env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture(
+            run_id=run_id
+        )
+        patients = _register_coordinated_t06_arrivals(coordinator)
+
+        run = env.process(coordinator.run())
+        env.run()
+
+        assert run.triggered
+        assert env.now == 20.0
+        assert [
+            (record.patient_id, record.sim_time)
+            for record in log.records
+            if record.event_type == "DEPARTURE"
+        ] == [("u1", 8.0), ("u2", 12.0), ("u3", 16.0), ("u4", 20.0)]
+        assert all(
+            patient.state == PatientState.FINISHED for patient in patients.values()
+        )
+        assert coordinator.pending_arrivals == coordinator.pending_travels == []
+        assert coordinator.next_event_time() is None
+        for station in (station_a, station_b):
+            assert station.waiting == [] and station.active == {}
+            assert station.resource.count == 0 and station.resource.queue == []
+
+        assert all(record.run_id == run_id for record in log.records)
+        traces.append([replace(record, run_id="") for record in log.records])
+
+    assert traces[0] == traces[1]
