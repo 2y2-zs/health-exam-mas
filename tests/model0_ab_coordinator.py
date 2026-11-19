@@ -8,13 +8,12 @@ Supported:
 - Phase 3: validated zero-time entry routing and travel
 - Phase 4: atomic prevalidation and deterministic queue commitment
 - Phase 5: synchronous service dispatch
-- Positive-duration travel registration and Phase 3 start (no arrival commit)
+- Phase 3 positive-duration travel registration, start and completion
 - Arrival, service and travel-completion next-time queries
 - Component-only SimPy generators
 
 Not yet supported:
-- Positive-duration travel completion commitment in the unified coordinator
-- Positive-duration travel completion and Phase 4 continuation
+- Travel completion integrated into the time-bucket generator
 - Full six-phase run() loop
 """
 
@@ -336,6 +335,140 @@ class MultiStationCoordinator:
         )
 
         return travel
+
+    def commit_due_travels(self) -> list[PatientAgent]:
+        """Phase 3: finish all positive-duration travels due at env.now.
+
+        Reject an overdue plan, then prevalidate the *entire* due batch
+        before changing any location, ready record, log, or pending plan.
+        Return arriving patients in stable (rank, patient_id) order.
+
+        This is synchronous: no yield, clock advance, queue entry, or
+        Resource acquisition. Phase 4 remains a separate call.
+        """
+        now = self.env.now
+
+        if any(travel.ends_at < now for travel in self.pending_travels):
+            raise RuntimeError("Overdue pending travel completion")
+
+        due = sorted(
+            (travel for travel in self.pending_travels if travel.ends_at == now),
+            key=lambda travel: (
+                travel.patient.patient_rank,
+                travel.patient.patient_id,
+            ),
+        )
+
+        # First pass: reject any bad plan before committing the first move.
+        seen_ids: set[str] = set()
+        for travel in due:
+            patient = travel.patient
+            patient_id = patient.patient_id
+
+            if patient_id in seen_ids:
+                raise ValueError(
+                    f"Duplicate patient ID in due travel batch: {patient_id!r}"
+                )
+            seen_ids.add(patient_id)
+
+            if self._admitted_patients_by_id.get(patient_id) is not patient:
+                raise ValueError(
+                    f"Travel patient {patient_id!r} is not the original "
+                    "Phase 2 admitted object"
+                )
+
+            if patient.state != PatientState.TRAVELLING:
+                raise ValueError(
+                    f"Patient {patient_id!r} must be TRAVELLING "
+                    "before travel completion"
+                )
+
+            if patient.location != travel.origin:
+                raise ValueError(
+                    f"Patient {patient_id!r} travel origin "
+                    "does not match patient location"
+                )
+
+            if (
+                patient.active_visit_id is not None
+                or patient.active_station_id is not None
+            ):
+                raise ValueError(
+                    f"Patient {patient_id!r} has an active visit"
+                )
+
+            if travel.destination not in self.stations:
+                raise ValueError(
+                    f"Travel destination {travel.destination!r} "
+                    "is not managed by this Coordinator"
+                )
+
+            if travel.destination not in eligible_stations(
+                patient.package, patient.completed_tests
+            ):
+                raise ValueError(
+                    f"Travel destination {travel.destination!r} "
+                    f"is not eligible for patient {patient_id!r}"
+                )
+
+            try:
+                duration = MODEL0_TRAVEL_TIMES[
+                    (travel.origin, travel.destination)
+                ]
+            except KeyError as exc:
+                raise ValueError("Unknown directed travel route") from exc
+
+            if duration <= 0 or travel.ends_at != travel.started_at + duration:
+                raise ValueError(
+                    f"Travel duration does not match matrix for {patient_id!r}"
+                )
+
+            if patient_id in self._ready_for_queue:
+                raise ValueError(
+                    f"Conflicting ready queue record for {patient_id!r}"
+                )
+
+            # A registered plan is not necessarily a started move.
+            # Require the corresponding event emitted by start_next_travel().
+            started = any(
+                record.event_type == "TRAVEL_START"
+                and record.phase == 3
+                and record.patient_id == patient_id
+                and record.sim_time == travel.started_at
+                and record.station_id == travel.destination
+                and record.prior_state == PatientState.DECIDING
+                and record.new_state == PatientState.TRAVELLING
+                for record in self.event_log.records
+            )
+            if not started:
+                raise ValueError(
+                    f"Travel for {patient_id!r} was registered but not started"
+                )
+
+        # Second pass: all business validation succeeded. Complete Phase 3.
+        for travel in due:
+            patient = travel.patient
+            patient.location = travel.destination
+            self.event_log.record(
+                sim_time=now,
+                event_type="TRAVEL_END",
+                patient_id=patient.patient_id,
+                prior_state=PatientState.TRAVELLING,
+                new_state=PatientState.TRAVELLING,
+                station_id=travel.destination,
+                phase=3,
+            )
+            self._ready_for_queue[patient.patient_id] = ReadyQueueEntry(
+                patient=patient,
+                station_id=travel.destination,
+                travel_ended_at=now,
+            )
+
+        # Consume only due plans; preserve every future plan object.
+        self.pending_travels = [
+            travel for travel in self.pending_travels if travel.ends_at != now
+        ]
+        return [travel.patient for travel in due]
 
     def commit_due_arrivals(self) -> list[PatientAgent]:
         """Phase 2: validate and commit all arrivals due at env.now."""

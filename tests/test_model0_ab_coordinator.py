@@ -5070,3 +5070,396 @@ def test_next_event_time_rejects_overdue_travel_without_mutation():
         assert station.resource.count == 0
         assert station.resource.users == []
         assert station.resource.queue == []
+
+
+# ==========================================================
+# Phase 3 positive-duration TRAVEL_END: synchronous batch
+# ==========================================================
+
+
+def test_commit_due_travels_p1_arrives_at_b_only_at_t5():
+    """A->B [4,5): nothing at 4.5; at 5 only TRAVEL_END and ready."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    travel = coordinator.start_next_travel(patient)
+    log_at_four = list(log.records)
+
+    env.run(until=4.5)
+    assert coordinator.commit_due_travels() == []
+    assert env.now == 4.5
+    assert log.records == log_at_four
+    assert coordinator.pending_travels == [travel]
+    assert coordinator.pending_travels[0] is travel
+    assert patient.state == PatientState.TRAVELLING
+    assert patient.location == "A"
+    assert coordinator._ready_for_queue == {}
+
+    env.run(until=5.0)
+    assert coordinator.next_event_time() == 5.0
+    arrived = coordinator.commit_due_travels()
+    assert arrived == [patient]
+    assert arrived[0] is patient
+    assert env.now == 5.0
+    assert coordinator.pending_travels == []
+    assert patient.state == PatientState.TRAVELLING
+    assert patient.location == "B"
+    assert patient.completed_tests == {"A"}
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+
+    assert len(log.records) == len(log_at_four) + 1
+    assert log.records[:-1] == log_at_four
+    end = log.records[-1]
+    assert (
+        end.sim_time, end.phase, end.event_type, end.patient_id,
+        end.station_id, end.prior_state, end.new_state,
+    ) == (
+        5.0, 3, "TRAVEL_END", "u1", "B",
+        PatientState.TRAVELLING, PatientState.TRAVELLING,
+    )
+    ready = coordinator._ready_for_queue["u1"]
+    assert ready.patient is patient
+    assert ready.station_id == "B"
+    assert ready.travel_ended_at == 5.0
+
+    # No Phase 4 or Phase 5 is triggered by travel completion.
+    assert not [r for r in log.records if r.sim_time == 5 and r.phase in (4, 5)]
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+
+def test_commit_due_travels_repeated_at_same_time_is_idempotent():
+    """A consumed plan can never produce a second TRAVEL_END."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    coordinator.start_next_travel(patient)
+    env.run(until=5.0)
+    assert coordinator.commit_due_travels() == [patient]
+    before_log = list(log.records)
+    ready_before = coordinator._ready_for_queue["u1"]
+
+    assert coordinator.commit_due_travels() == []
+    assert env.now == 5.0
+    assert log.records == before_log
+    assert coordinator._ready_for_queue["u1"] is ready_before
+    assert coordinator.pending_travels == []
+    assert patient.location == "B"
+    assert patient.state == PatientState.TRAVELLING
+    assert sum(
+        r.event_type == "TRAVEL_END" and r.sim_time == 5.0
+        for r in log.records
+    ) == 1
+    assert station_a.resource.count == station_b.resource.count == 0
+
+
+@pytest.mark.parametrize("spoof_travelling", [False, True])
+def test_commit_due_travels_registered_but_not_started_is_rejected(
+    spoof_travelling,
+):
+    """Registration alone is insufficient, even if state is spoofed."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    plan = ScheduledTravel(patient, "A", "B", 4.0, 5.0)
+    coordinator.register_travel(plan)
+    if spoof_travelling:
+        patient.state = PatientState.TRAVELLING
+
+    env.run(until=5.0)
+    snapshot_log = list(log.records)
+    snapshot_plans = list(coordinator.pending_travels)
+    snapshot_state = (patient.state, patient.location)
+
+    match = "not started" if spoof_travelling else "must be TRAVELLING"
+    with pytest.raises(ValueError, match=match):
+        coordinator.commit_due_travels()
+
+    assert env.now == 5.0
+    assert log.records == snapshot_log
+    assert coordinator.pending_travels == snapshot_plans == [plan]
+    assert coordinator.pending_travels[0] is plan
+    assert (patient.state, patient.location) == snapshot_state
+    assert coordinator._ready_for_queue == {}
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.queue == []
+
+
+def _prepare_two_due_travels_at_t5():
+    """P1 A->B and B-then-A B->A both start at 4 and end at 5.
+
+    Register and start in reverse rank order to verify due-batch sorting.
+    """
+    env = simpy.Environment()
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id="AB_TWO_DUE_TRAVELS")
+    coordinator = MultiStationCoordinator(
+        env, {"B": station_b, "A": station_a}, log
+    )
+    b_then_a = PackageConfig(
+        required_tests=frozenset({"A", "B"}),
+        fixed_route=("B", "A"),
+        hard_precedence=frozenset(),
+    )
+    a_patient = PatientAgent("a", 1, P1_CONFIG)
+    b_patient = PatientAgent("b", 2, b_then_a)
+
+    for patient in (b_patient, a_patient):
+        coordinator.register_arrival(ScheduledArrival(0.0, patient))
+    process = env.process(coordinator.process_next_event_bucket())
+    env.run(until=process)
+    assert process.value == ([], [a_patient, b_patient])
+    ready = coordinator.route_entry_arrivals(process.value[1])
+    assert coordinator.commit_queue_entries(ready) == [a_patient, b_patient]
+    coordinator.dispatch_available_services()
+    assert a_patient.state == b_patient.state == PatientState.IN_SERVICE
+    assert next(iter(station_a.active.values())).ends_at == 4.0
+    assert next(iter(station_b.active.values())).ends_at == 3.0
+
+    env.run(until=3.0)
+    assert coordinator.complete_due_services() == [b_patient]
+    assert b_patient.state == PatientState.NEEDS_ROUTING
+    assert b_patient.location == "B"
+
+    env.run(until=4.0)
+    assert coordinator.complete_due_services() == [a_patient]
+    assert a_patient.state == PatientState.NEEDS_ROUTING
+    assert a_patient.location == "A"
+
+    # Reverse rank: b's travel is registered first, but due commits sort.
+    b_travel = coordinator.start_next_travel(b_patient)
+    a_travel = coordinator.start_next_travel(a_patient)
+    assert b_travel.ends_at == a_travel.ends_at == 5.0
+    assert coordinator.pending_travels == [b_travel, a_travel]
+    assert env.now == 4.0
+    return (
+        env, coordinator, station_a, station_b, log,
+        a_patient, b_patient, a_travel, b_travel,
+    )
+
+
+def test_commit_due_travels_stable_rank_order_and_ready_records():
+    """Two concurrent due travels commit by rank, not registration order."""
+    (
+        env, coordinator, station_a, station_b, log,
+        a, b, a_plan, b_plan,
+    ) = _prepare_two_due_travels_at_t5()
+    env.run(until=5.0)
+    records_before = list(log.records)
+
+    assert coordinator.commit_due_travels() == [a, b]
+    assert coordinator.pending_travels == []
+    assert a.location == "B"
+    assert b.location == "A"
+    assert a.state == b.state == PatientState.TRAVELLING
+    assert [(r.patient_id, r.station_id, r.sim_time, r.phase)
+            for r in log.records[len(records_before):]] == [
+        ("a", "B", 5.0, 3),
+        ("b", "A", 5.0, 3),
+    ]
+    assert all(r.event_type == "TRAVEL_END" for r in log.records[len(records_before):])
+    for patient, station_id in ((a, "B"), (b, "A")):
+        ready = coordinator._ready_for_queue[patient.patient_id]
+        assert ready.patient is patient
+        assert ready.station_id == station_id
+        assert ready.travel_ended_at == 5.0
+    assert not [r for r in log.records if r.sim_time == 5.0 and r.phase == 4]
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.resource.count == 0
+        assert station.resource.queue == []
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "wrong_state",
+        "wrong_origin",
+        "active_visit",
+        "ineligible",
+        "ready_conflict",
+        "impostor",
+        "duplicate_id",
+    ],
+)
+def test_commit_due_travels_invalid_batch_is_atomic(invalid):
+    """A bad later plan rejects the *whole* due batch, including valid a."""
+    (
+        env, coordinator, station_a, station_b, log,
+        a, b, a_plan, b_plan,
+    ) = _prepare_two_due_travels_at_t5()
+    env.run(until=5.0)
+
+    if invalid == "wrong_state":
+        b.state = PatientState.WAITING
+        error = "must be TRAVELLING"
+    elif invalid == "wrong_origin":
+        b.location = "A"
+        error = "origin"
+    elif invalid == "active_visit":
+        b.active_visit_id = "invalid-visit"
+        error = "active visit"
+    elif invalid == "ineligible":
+        b.completed_tests.add("A")
+        error = "not eligible"
+    elif invalid == "ready_conflict":
+        coordinator._ready_for_queue["b"] = ReadyQueueEntry(
+            patient=b, station_id="A", travel_ended_at=5.0
+        )
+        error = "Conflicting ready"
+    elif invalid == "impostor":
+        fake = PatientAgent("b", 2, b.package)
+        fake.state = PatientState.TRAVELLING
+        fake.location = "B"
+        fake.completed_tests.add("B")
+        coordinator.pending_travels[0] = ScheduledTravel(
+            fake, "B", "A", 4.0, 5.0
+        )
+        error = "original Phase 2 admitted object"
+    elif invalid == "duplicate_id":
+        coordinator.pending_travels.append(
+            ScheduledTravel(b, "B", "A", 4.0, 5.0)
+        )
+        error = "Duplicate patient ID"
+    else:
+        raise AssertionError(invalid)
+
+    # Snapshot AFTER deliberate fixture corruption, BEFORE the call.
+    records_before = list(log.records)
+    plans_before = list(coordinator.pending_travels)
+    ready_before = dict(coordinator._ready_for_queue)
+    a_before = (
+        a.state, a.location, set(a.completed_tests),
+        a.active_visit_id, a.active_station_id,
+    )
+    b_before = (
+        b.state, b.location, set(b.completed_tests),
+        b.active_visit_id, b.active_station_id,
+    )
+
+    with pytest.raises(ValueError, match=error):
+        coordinator.commit_due_travels()
+
+    assert env.now == 5.0
+    assert log.records == records_before
+    assert len(coordinator.pending_travels) == len(plans_before)
+    for actual, original in zip(coordinator.pending_travels, plans_before):
+        assert actual is original
+    assert coordinator._ready_for_queue.keys() == ready_before.keys()
+    for patient_id, ready in ready_before.items():
+        assert coordinator._ready_for_queue[patient_id] is ready
+    assert (
+        a.state, a.location, a.completed_tests,
+        a.active_visit_id, a.active_station_id,
+    ) == a_before
+    assert (
+        b.state, b.location, b.completed_tests,
+        b.active_visit_id, b.active_station_id,
+    ) == b_before
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+
+def test_commit_due_travels_overdue_rejected_without_side_effects():
+    """No overdue plan may be consumed, even when another is due later."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    plan = coordinator.start_next_travel(patient)
+    env.run(until=5.5)
+    records_before = list(log.records)
+    plans_before = list(coordinator.pending_travels)
+    patient_before = (
+        patient.state, patient.location, set(patient.completed_tests),
+        patient.active_visit_id, patient.active_station_id,
+    )
+
+    with pytest.raises(RuntimeError, match="Overdue pending travel"):
+        coordinator.commit_due_travels()
+
+    assert env.now == 5.5
+    assert log.records == records_before
+    assert coordinator.pending_travels == plans_before == [plan]
+    assert coordinator.pending_travels[0] is plan
+    assert coordinator._ready_for_queue == {}
+    assert (
+        patient.state, patient.location, patient.completed_tests,
+        patient.active_visit_id, patient.active_station_id,
+    ) == patient_before
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.queue == []
+
+
+def test_commit_due_travels_consumes_due_but_preserves_future_plan():
+    """At t=5 consume A->B [4,5), retain B->A [5,6) unchanged."""
+    env = simpy.Environment()
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id="AB_DUE_AND_FUTURE_TRAVELS")
+    coordinator = MultiStationCoordinator(
+        env, {"B": station_b, "A": station_a}, log
+    )
+    b_then_a = PackageConfig(
+        required_tests=frozenset({"A", "B"}),
+        fixed_route=("B", "A"),
+        hard_precedence=frozenset(),
+    )
+    a = PatientAgent("a", 1, P1_CONFIG)
+    b = PatientAgent("b", 2, b_then_a)
+    for patient in (b, a):
+        coordinator.register_arrival(ScheduledArrival(0.0, patient))
+    process = env.process(coordinator.process_next_event_bucket())
+    env.run(until=process)
+    ready = coordinator.route_entry_arrivals(process.value[1])
+    assert coordinator.commit_queue_entries(ready) == [a, b]
+    coordinator.dispatch_available_services()
+
+    env.run(until=3.0)
+    assert coordinator.complete_due_services() == [b]
+    env.run(until=4.0)
+    assert coordinator.complete_due_services() == [a]
+    a_plan = coordinator.start_next_travel(a)
+    assert a_plan.ends_at == 5.0
+
+    env.run(until=5.0)
+    b_plan = coordinator.start_next_travel(b)
+    assert b_plan.started_at == 5.0
+    assert b_plan.ends_at == 6.0
+    assert coordinator.pending_travels == [a_plan, b_plan]
+
+    arrived = coordinator.commit_due_travels()
+    assert arrived == [a]
+    assert coordinator.pending_travels == [b_plan]
+    assert coordinator.pending_travels[0] is b_plan
+    assert a.location == "B"
+    assert b.location == "B"
+    assert b.state == PatientState.TRAVELLING
+    assert coordinator._ready_for_queue["a"].travel_ended_at == 5.0
+    assert "b" not in coordinator._ready_for_queue
+    assert coordinator.next_event_time() == 6.0
+    assert env.now == 5.0
+    assert [(r.patient_id, r.event_type) for r in log.records
+            if r.sim_time == 5.0 and r.event_type == "TRAVEL_END"] == [
+        ("a", "TRAVEL_END")
+    ]
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.queue == []
