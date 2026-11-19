@@ -6211,3 +6211,107 @@ def test_run_coordinated_t04_allows_alternative_route_a_c_b():
         assert station.waiting == [] and station.active == {}
         assert station.resource.count == 0 and station.resource.queue == []
         assert station.release_count == 1
+
+
+def test_run_coordinated_t05_counts_travel_separately_from_waiting():
+    """P1 reaches busy B before its queue wait begins."""
+    env = simpy.Environment()
+    stations = {
+        station_id: AOnlyCoordinatedStation(env, station_id=station_id)
+        for station_id in ("A", "B", "C")
+    }
+    log = EventLog(run_id="ABC_T05")
+    coordinator = MultiStationCoordinator(env, stations, log)
+    p2_config = PackageConfig(
+        required_tests=frozenset({"B", "C"}),
+        fixed_route=("B", "C"),
+        hard_precedence=frozenset(),
+    )
+    u1 = PatientAgent("u1", 1, P1_CONFIG)
+    u2 = PatientAgent("u2", 2, p2_config)
+    coordinator.register_arrival(ScheduledArrival(0.0, u1))
+    coordinator.register_arrival(ScheduledArrival(4.0, u2))
+
+    run = env.process(coordinator.run())
+    env.run()
+
+    assert [
+        (record.patient_id, record.sim_time)
+        for record in log.records
+        if record.event_type == "ARRIVAL"
+    ] == [("u1", 0.0), ("u2", 4.0)]
+    assert [
+        (record.patient_id, record.sim_time, record.phase)
+        for record in log.records
+        if record.event_type == "DEPARTURE"
+    ] == [("u1", 10.0, 3), ("u2", 13.0, 3)]
+
+    # Manual times for travel start, queue entry, service start and release.
+    expected_visits = {
+        ("u1", "A"): (0.0, 0.0, 0.0, 4.0),
+        ("u1", "B"): (4.0, 5.0, 7.0, 10.0),
+        ("u2", "B"): (4.0, 4.0, 4.0, 7.0),
+        ("u2", "C"): (7.0, 8.0, 8.0, 13.0),
+    }
+    visit_events = {
+        "TRAVEL_START", "TRAVEL_END", "QUEUE_ENTRY",
+        "SERVICE_START", "SERVICE_END", "RESOURCE_RELEASE",
+    }
+    observed_visits = {}
+    for record in log.records:
+        if record.event_type in visit_events:
+            visit = (record.patient_id, record.station_id)
+            observed_visits.setdefault(visit, []).append(
+                (record.sim_time, record.phase, record.event_type)
+            )
+
+    assert observed_visits.keys() == expected_visits.keys()
+    for visit, (move_start, queue_entry, service_start, service_end) in (
+        expected_visits.items()
+    ):
+        assert observed_visits[visit] == [
+            (move_start, 3, "TRAVEL_START"),
+            (queue_entry, 3, "TRAVEL_END"),
+            (queue_entry, 4, "QUEUE_ENTRY"),
+            (service_start, 5, "SERVICE_START"),
+            (service_end, 0, "SERVICE_END"),
+            (service_end, 1, "RESOURCE_RELEASE"),
+        ], visit
+    assert [
+        (record.phase, record.patient_id, record.event_type)
+        for record in log.records
+        if record.sim_time == 7.0 and record.station_id == "B"
+    ] == [
+        (0, "u2", "SERVICE_END"),
+        (1, "u2", "RESOURCE_RELEASE"),
+        (5, "u1", "SERVICE_START"),
+    ]
+
+    u1_times = {
+        (record.station_id, record.event_type): record.sim_time
+        for record in log.records
+        if record.patient_id == "u1"
+    }
+    service_time = sum(
+        u1_times[station, "SERVICE_END"] - u1_times[station, "SERVICE_START"]
+        for station in ("A", "B")
+    )
+    travel_time = u1_times["B", "TRAVEL_END"] - u1_times["B", "TRAVEL_START"]
+    waiting_time = u1_times["B", "SERVICE_START"] - u1_times["B", "QUEUE_ENTRY"]
+    cycle_time = u1_times[None, "DEPARTURE"] - u1_times[None, "ARRIVAL"]
+    assert (service_time, travel_time, waiting_time) == (7.0, 1.0, 2.0)
+    assert cycle_time == service_time + travel_time + waiting_time == 10.0
+
+    assert run.triggered
+    assert env.now == 13.0
+    for patient, expected_tests in ((u1, {"A", "B"}), (u2, {"B", "C"})):
+        assert patient.state == PatientState.FINISHED
+        assert patient.completed_tests == expected_tests
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+
+    assert coordinator.pending_arrivals == coordinator.pending_travels == []
+    assert coordinator.next_event_time() is None
+    for station in stations.values():
+        assert station.waiting == [] and station.active == {}
+        assert station.resource.count == 0 and station.resource.queue == []
