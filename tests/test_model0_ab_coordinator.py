@@ -4670,8 +4670,9 @@ def test_start_next_travel_p1_a_to_b_at_t4():
         range(1, len(log.records) + 1)
     )
 
-    # A pending travel is not yet a scheduled event-bucket completion.
-    assert coordinator.next_event_time() is None
+    # Travel completion is now included in the pure next-event query.
+    # TRAVEL_END itself is still NOT committed in this task.
+    assert coordinator.next_event_time() == 5.0
     assert coordinator._ready_for_queue == {}
     assert not [
         record for record in log.records
@@ -4817,6 +4818,252 @@ def test_start_next_travel_invalid_patient_has_no_side_effects(invalid):
         candidate.active_visit_id, candidate.active_station_id,
     ) == candidate_before
     assert coordinator._ready_for_queue == {}
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+
+
+# ==========================================================
+# Unified pure next-time query: arrivals, services and travels
+# ==========================================================
+
+
+def _prepare_p1_with_active_b_service_at_t4(b_start_at):
+    """P1 A [0,4) released at t=4; B service ends at b_start_at+3.
+
+    The independent B service is started with the existing Station
+    component. No Coordinator travel execution is involved.
+    """
+    env = simpy.Environment()
+    station_a = AOnlyCoordinatedStation(env, station_id="A")
+    station_b = AOnlyCoordinatedStation(env, station_id="B")
+    log = EventLog(run_id="AB_THREE_WAY_TIME_QUERY")
+    coordinator = MultiStationCoordinator(
+        env=env,
+        stations={"B": station_b, "A": station_a},
+        event_log=log,
+    )
+
+    p1 = PatientAgent("p1", 1, P1_CONFIG)
+    coordinator.register_arrival(ScheduledArrival(0.0, p1))
+    initial = env.process(coordinator.process_next_event_bucket())
+    env.run(until=initial)
+    assert initial.value == ([], [p1])
+    ready = coordinator.route_entry_arrivals([p1])
+    assert coordinator.commit_queue_entries(ready) == [p1]
+    coordinator.dispatch_available_services()
+    assert next(iter(station_a.active.values())).ends_at == 4.0
+
+    env.run(until=b_start_at)
+    b_patient = PatientAgent("b_patient", 2, B_ONLY)
+    b_patient.location = "B"
+    b_patient.state = PatientState.TRAVELLING
+    station_b.enqueue(b_patient, log)
+    station_b.start_available(log)
+    assert next(iter(station_b.active.values())).ends_at == b_start_at + 3.0
+
+    env.run(until=4.0)
+    assert coordinator.complete_due_services() == [p1]
+    assert p1.state == PatientState.NEEDS_ROUTING
+    assert len(station_b.active) == 1
+
+    travel = coordinator.start_next_travel(p1)
+    assert travel.ends_at == 5.0
+    assert p1.state == PatientState.TRAVELLING
+    assert p1.location == "A"
+    assert env.now == 4.0
+    return env, coordinator, station_a, station_b, log, p1, b_patient, travel
+
+
+def test_next_event_time_includes_started_p1_travel_at_t5_without_side_effects():
+    """P1 A -> B [4,5) contributes t=5 after A's release."""
+    env, coordinator, station_a, station_b, log, p1 = (
+        _prepare_released_p1_at_t4()
+    )
+    plan = coordinator.start_next_travel(p1)
+
+    records_before = list(log.records)
+    plans_before = list(coordinator.pending_travels)
+    state_before = (
+        p1.state, p1.location, set(p1.completed_tests),
+        p1.active_visit_id, p1.active_station_id,
+    )
+
+    assert coordinator.next_event_time() == 5.0
+    assert coordinator.next_event_time() == 5.0
+    assert env.now == 4.0
+    assert log.records == records_before
+    assert coordinator.pending_travels == plans_before == [plan]
+    assert coordinator.pending_travels[0] is plan
+    assert (
+        p1.state, p1.location, p1.completed_tests,
+        p1.active_visit_id, p1.active_station_id,
+    ) == state_before
+    assert coordinator._ready_for_queue == {}
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.queue == []
+
+
+def test_next_event_time_includes_registered_travel_before_start():
+    """A registered (but not started) plan is still a pending travel."""
+    env, coordinator, _, _, log, p1 = _prepare_released_p1_at_t4()
+    plan = ScheduledTravel(p1, "A", "B", 4.0, 5.0)
+    coordinator.register_travel(plan)
+    records_before = list(log.records)
+
+    assert coordinator.next_event_time() == 5.0
+    assert env.now == 4.0
+    assert log.records == records_before
+    assert coordinator.pending_travels == [plan]
+    assert coordinator.pending_travels[0] is plan
+    assert p1.state == PatientState.NEEDS_ROUTING
+    assert p1.location == "A"
+
+
+def test_next_event_time_earlier_arrival_precedes_pending_travel():
+    """At t=4, arrival@4.5 must win over travel completion@5."""
+    env, coordinator, _, _, log, p1 = _prepare_released_p1_at_t4()
+    plan = coordinator.start_next_travel(p1)
+    newcomer = PatientAgent("new", 2, B_ONLY)
+    arrival = ScheduledArrival(4.5, newcomer)
+    coordinator.register_arrival(arrival)
+    records_before = list(log.records)
+
+    assert coordinator.next_event_time() == 4.5
+    assert coordinator.next_event_time() == 4.5
+    assert env.now == 4.0
+    assert log.records == records_before
+    assert coordinator.pending_travels == [plan]
+    assert coordinator.pending_arrivals == [arrival]
+    assert newcomer.state == PatientState.ARRIVED
+    assert newcomer.location == "ENTRY"
+    assert p1.state == PatientState.TRAVELLING
+    assert p1.location == "A"
+
+
+def test_next_event_time_earlier_service_precedes_pending_travel():
+    """B service end@4.5 must win over A->B travel end@5."""
+    (
+        env, coordinator, station_a, station_b, log, p1,
+        b_patient, plan,
+    ) = _prepare_p1_with_active_b_service_at_t4(1.5)
+    records_before = list(log.records)
+    active_before = dict(station_b.active)
+    users_before = list(station_b.resource.users)
+
+    assert coordinator.next_service_completion_time() == 4.5
+    assert coordinator.next_event_time() == 4.5
+    assert coordinator.next_event_time() == 4.5
+    assert env.now == 4.0
+    assert log.records == records_before
+    assert coordinator.pending_travels == [plan]
+    assert station_b.active == active_before
+    assert station_b.resource.users == users_before
+    assert station_b.resource.count == 1
+    assert station_a.resource.count == 0
+    assert b_patient.state == PatientState.IN_SERVICE
+    assert p1.state == PatientState.TRAVELLING
+    assert p1.location == "A"
+
+
+def test_next_event_time_three_way_tie_at_t5_is_pure():
+    """Arrival, service and travel all due at 5; querying commits none."""
+    (
+        env, coordinator, station_a, station_b, log, p1,
+        b_patient, travel,
+    ) = _prepare_p1_with_active_b_service_at_t4(2.0)
+    newcomer = PatientAgent("arrival5", 3, B_ONLY)
+    arrival = ScheduledArrival(5.0, newcomer)
+    coordinator.register_arrival(arrival)
+    records_before = list(log.records)
+    active_before = dict(station_b.active)
+    users_before = list(station_b.resource.users)
+
+    assert coordinator.next_event_time() == 5.0
+    assert coordinator.next_event_time() == 5.0
+    assert env.now == 4.0
+
+    # External clock advance only: the Coordinator commits no phases.
+    env.run(until=5.0)
+    assert coordinator.next_event_time() == 5.0
+    assert coordinator.next_event_time() == 5.0
+    assert env.now == 5.0
+    assert log.records == records_before
+    assert coordinator.pending_arrivals == [arrival]
+    assert coordinator.pending_travels == [travel]
+    assert station_b.active == active_before
+    assert station_b.resource.users == users_before
+    assert station_b.resource.count == 1
+    assert station_a.resource.count == 0
+    assert b_patient.state == PatientState.IN_SERVICE
+    assert p1.state == PatientState.TRAVELLING
+    assert p1.location == "A"
+    assert newcomer.state == PatientState.ARRIVED
+    assert newcomer.location == "ENTRY"
+    assert not [r for r in log.records if r.sim_time == 5.0]
+
+
+def test_next_event_time_due_now_travel_does_not_commit_travel_end():
+    """Due travel@5 is returned even at env.now==5; no TRAVEL_END."""
+    env, coordinator, station_a, station_b, log, p1 = (
+        _prepare_released_p1_at_t4()
+    )
+    travel = coordinator.start_next_travel(p1)
+    records_before = list(log.records)
+    env.run(until=5.0)
+
+    assert coordinator.next_event_time() == 5.0
+    assert env.now == 5.0
+    assert coordinator.pending_travels == [travel]
+    assert log.records == records_before
+    assert p1.state == PatientState.TRAVELLING
+    assert p1.location == "A"
+    assert coordinator._ready_for_queue == {}
+    assert station_a.resource.count == 0
+    assert station_b.resource.count == 0
+
+
+def test_next_event_time_rejects_overdue_travel_without_mutation():
+    """An overdue travel is an error even with a future arrival pending."""
+    env, coordinator, station_a, station_b, log, p1 = (
+        _prepare_released_p1_at_t4()
+    )
+    travel = coordinator.start_next_travel(p1)
+    newcomer = PatientAgent("future", 2, B_ONLY)
+    arrival = ScheduledArrival(6.0, newcomer)
+    coordinator.register_arrival(arrival)
+
+    env.run(until=5.5)
+    records_before = list(log.records)
+    plans_before = list(coordinator.pending_travels)
+    arrivals_before = list(coordinator.pending_arrivals)
+    ready_before = dict(coordinator._ready_for_queue)
+    state_before = (
+        p1.state, p1.location, set(p1.completed_tests),
+        p1.active_visit_id, p1.active_station_id,
+    )
+
+    with pytest.raises(RuntimeError, match="Overdue pending travel"):
+        coordinator.next_event_time()
+
+    assert env.now == 5.5
+    assert log.records == records_before
+    assert coordinator.pending_travels == plans_before == [travel]
+    assert coordinator.pending_travels[0] is travel
+    assert coordinator.pending_arrivals == arrivals_before == [arrival]
+    assert coordinator._ready_for_queue == ready_before
+    assert (
+        p1.state, p1.location, p1.completed_tests,
+        p1.active_visit_id, p1.active_station_id,
+    ) == state_before
+    assert newcomer.state == PatientState.ARRIVED
+    assert newcomer.location == "ENTRY"
     for station in (station_a, station_b):
         assert station.waiting == []
         assert station.active == {}

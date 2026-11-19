@@ -9,11 +9,11 @@ Supported:
 - Phase 4: atomic prevalidation and deterministic queue commitment
 - Phase 5: synchronous service dispatch
 - Positive-duration travel registration and Phase 3 start (no arrival commit)
-- Service and arrival next-time queries
+- Arrival, service and travel-completion next-time queries
 - Component-only SimPy generators
 
 Not yet supported:
-- Positive-duration travel commitment/time selection in the unified coordinator
+- Positive-duration travel completion commitment in the unified coordinator
 - Positive-duration travel completion and Phase 4 continuation
 - Full six-phase run() loop
 """
@@ -802,8 +802,16 @@ class MultiStationCoordinator:
         return earliest
 
     def next_event_time(self) -> float | None:
-        """Pure query: earliest pending arrival or active service end."""
+        """Pure query: next arrival, service end or travel completion.
 
+        Scan all three event sources. Any overdue arrival, service or
+        travel is an error, even if another event has an earlier time.
+        A due-now event is valid and is returned without committing it.
+
+        No clock advance, patient changes, log records or plan removal.
+        Travel completions are not processed by the current Phase 0-2
+        event-bucket generator; that is a separate future change.
+        """
         now = self.env.now
         candidates: list[float] = []
 
@@ -813,14 +821,19 @@ class MultiStationCoordinator:
             candidates.append(arrival.at)
 
         service_time = self.next_service_completion_time()
-
         if service_time is not None:
             candidates.append(service_time)
 
-        if not candidates:
-            return None
+        for travel in self.pending_travels:
+            if travel.ends_at < now:
+                raise RuntimeError(
+                    "Overdue pending travel completion: "
+                    f"patient {travel.patient.patient_id!r}, "
+                    f"ends_at={travel.ends_at}, now={now}"
+                )
+            candidates.append(travel.ends_at)
 
-        return min(candidates)
+        return min(candidates) if candidates else None
 
     def process_next_service_completion(self):
         """Service-only generator, retained for component testing."""
