@@ -9,6 +9,7 @@ Supported:
 - Phase 4: atomic prevalidation and deterministic queue commitment
 - Phase 5: synchronous service dispatch
 - Phase 3 positive-duration travel registration, start and completion
+- Phase 3: departure after final service release
 - Arrival, service and travel-completion next-time queries
 - Component-only SimPy generators
 
@@ -122,6 +123,8 @@ class MultiStationCoordinator:
         # Phase 3 produces these ready records after TRAVEL_END.
         # Phase 4 consumes each one exactly once.
         self._ready_for_queue: dict[str, ReadyQueueEntry] = {}
+
+        self._pending_final_releases: dict[str, float] = {}
 
     def register_arrival(
         self,
@@ -912,7 +915,58 @@ class MultiStationCoordinator:
                 )
             )
 
+        for patient in released:
+            if (
+                patient.state == PatientState.FINISHED
+                and self._admitted_patients_by_id.get(patient.patient_id) is patient
+            ):
+                self._pending_final_releases[patient.patient_id] = self.env.now
+
         return released
+
+    def commit_departures(self, finished_patients: list[PatientAgent]) -> None:
+        """Phase 3: record each final release from this bucket exactly once."""
+        now = self.env.now
+        seen_ids: set[str] = set()
+        travelling_ids = {travel.patient.patient_id for travel in self.pending_travels}
+
+        for patient in finished_patients:
+            patient_id = patient.patient_id
+            if patient_id in seen_ids:
+                raise ValueError(f"Duplicate departure for patient {patient_id!r}")
+            seen_ids.add(patient_id)
+
+            if self._admitted_patients_by_id.get(patient_id) is not patient:
+                raise ValueError(f"Patient {patient_id!r} is not the admitted object")
+            if (
+                patient.state != PatientState.FINISHED
+                or patient.completed_tests != patient.package.required_tests
+            ):
+                raise ValueError(f"Patient {patient_id!r} has unfinished examinations")
+            if self._pending_final_releases.get(patient_id) != now:
+                raise ValueError(
+                    f"Patient {patient_id!r} has no unconsumed final release at t={now}"
+                )
+            if (
+                patient.active_visit_id is not None
+                or patient.active_station_id is not None
+                or patient_id in travelling_ids
+                or patient_id in self._ready_for_queue
+            ):
+                raise ValueError(f"Patient {patient_id!r} still has outstanding work")
+
+        for patient in sorted(
+            finished_patients, key=lambda item: (item.patient_rank, item.patient_id)
+        ):
+            self.event_log.record(
+                sim_time=now,
+                event_type="DEPARTURE",
+                patient_id=patient.patient_id,
+                prior_state=PatientState.FINISHED,
+                new_state=PatientState.FINISHED,
+                phase=3,
+            )
+            del self._pending_final_releases[patient.patient_id]
 
     def next_service_completion_time(self) -> float | None:
         """Pure query: earliest active service completion."""

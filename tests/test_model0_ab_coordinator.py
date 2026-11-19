@@ -5539,3 +5539,105 @@ def test_phase5_dispatch_merges_same_time_arrival_and_continuation(
     assert station_b.resource.count == 1
     assert station_b.resource.queue == []
     assert station_a.resource.count == 0
+
+
+@pytest.mark.parametrize("departure_time", [8.0, 9.0])
+def test_commit_departures_requires_final_release_in_current_bucket(departure_time):
+    """P1 can depart only in the bucket that releases its final B visit."""
+    env, coordinator, station_a, station_b, log, patient = (
+        _prepare_released_p1_at_t4()
+    )
+    records_before = list(log.records)
+    with pytest.raises(ValueError, match="unfinished examinations"):
+        coordinator.commit_departures([patient])
+    assert log.records == records_before
+    assert patient.state == PatientState.NEEDS_ROUTING
+
+    coordinator.start_next_travel(patient)
+    env.run(until=5.0)
+    ready = coordinator.commit_due_travels()
+    coordinator.commit_queue_entries(ready)
+    coordinator.dispatch_available_services()
+
+    process = env.process(coordinator.process_next_event_bucket())
+    released, arrived = env.run(until=process)
+    assert env.now == 8.0
+    assert len(released) == 1 and released[0] is patient
+    assert arrived == []
+    assert patient.state == PatientState.FINISHED
+    assert patient.completed_tests == {"A", "B"}
+
+    if departure_time == 9.0:
+        env.run(until=departure_time)
+        records_before = list(log.records)
+        with pytest.raises(ValueError, match="no unconsumed final release"):
+            coordinator.commit_departures(released)
+        assert log.records == records_before
+        assert env.now == departure_time
+        return
+
+    coordinator.commit_departures(released)
+    assert [
+        (r.phase, r.event_type, r.station_id, r.patient_id)
+        for r in log.records
+        if r.sim_time == 8.0
+    ] == [
+        (0, "SERVICE_END", "B", "u1"),
+        (1, "RESOURCE_RELEASE", "B", "u1"),
+        (3, "DEPARTURE", None, "u1"),
+    ]
+    departure = log.records[-1]
+    assert departure.prior_state == departure.new_state == PatientState.FINISHED
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+    for station in (station_a, station_b):
+        assert station.release_count == 1
+        assert station.active == {}
+        assert station.waiting == []
+        assert station.resource.count == 0
+        assert station.resource.queue == []
+
+    records_before = list(log.records)
+    with pytest.raises(ValueError, match="no unconsumed final release"):
+        coordinator.commit_departures(released)
+    assert log.records == records_before
+    assert sum(r.event_type == "DEPARTURE" for r in log.records) == 1
+    assert env.now == 8.0
+
+
+def test_commit_departures_validates_full_batch_and_orders_by_rank():
+    """A finishes at t=4 after service [0,4), B after [1,4)."""
+    env, coordinator, _, _, log = _make_ab_phase3_fixture()
+    a_patient = PatientAgent("a", 2, A_ONLY)
+    b_patient = PatientAgent("b", 1, B_ONLY)
+    coordinator.register_arrival(ScheduledArrival(0.0, a_patient))
+    coordinator.register_arrival(ScheduledArrival(1.0, b_patient))
+
+    for _ in range(2):
+        process = env.process(coordinator.process_next_event_bucket())
+        _, arrived = env.run(until=process)
+        queued = coordinator.route_entry_arrivals(arrived)
+        coordinator.commit_queue_entries(queued)
+        coordinator.dispatch_available_services()
+
+    process = env.process(coordinator.process_next_event_bucket())
+    released, _ = env.run(until=process)
+    assert released == [a_patient, b_patient]
+    assert env.now == 4.0
+
+    impostor = PatientAgent("b", 1, B_ONLY)
+    records_before = list(log.records)
+    with pytest.raises(ValueError, match="not the admitted object"):
+        coordinator.commit_departures([a_patient, impostor])
+    with pytest.raises(ValueError, match="Duplicate departure"):
+        coordinator.commit_departures([a_patient, a_patient])
+    assert log.records == records_before
+
+    coordinator.commit_departures(released)
+    assert [
+        (r.sim_time, r.phase, r.patient_id, r.event_type)
+        for r in log.records[len(records_before):]
+    ] == [
+        (4.0, 3, "b", "DEPARTURE"),
+        (4.0, 3, "a", "DEPARTURE"),
+    ]
