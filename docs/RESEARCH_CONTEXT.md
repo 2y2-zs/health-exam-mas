@@ -46,7 +46,7 @@ The references remain a reading list, not a verified queue-policy catalogue. A p
 
 ## Schedule
 
-- Interim poster + video: 2026-11-29 23:59 (project deadline discussed in PSP305 materials; recheck official LMS).
+- Interim Poster Presentation (poster + video): 2026-12-16 12:00 (PSP305 Module Handbook, 2026/27, PDF p. 4).
 - Oral demonstration: 2027-04-05.
 - Dissertation: 2027-05-09.
 
