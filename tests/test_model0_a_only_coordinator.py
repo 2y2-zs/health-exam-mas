@@ -2723,3 +2723,73 @@ def test_p1_a_release_to_b_run_component_linkage():
 
     # Do not call assert_cleanup(): that helper is intended
     # for single-station, single-package runs.
+
+
+def test_t08_reuses_released_capacity_and_rejects_stale_visit():
+    """An old release cannot affect the patient who took the service slot."""
+    env = simpy.Environment()
+    station = AOnlyCoordinatedStation(env, station_id="A")
+    log = EventLog(run_id="A_ONLY_T08")
+    u1 = PatientAgent("u1", 1, A_ONLY)
+    u2 = PatientAgent("u2", 2, A_ONLY)
+    coordinator = AOnlyCoordinator(
+        env, station, log, [ScheduledArrival(0.0, u1), ScheduledArrival(1.0, u2)]
+    )
+
+    run = env.process(coordinator.run())
+    env.run(until=3.0)
+    (old_visit,) = station.active.values()
+    assert old_visit.patient is u1
+    assert u2.state == PatientState.WAITING
+
+    env.run(until=5.0)
+    (current_visit,) = station.active.values()
+    assert current_visit.patient is u2
+    assert u2.state == PatientState.IN_SERVICE
+    assert station.release_count == 1
+    assert station.resource.users == [current_visit.request]
+    before_log = list(log.records)
+    before_patients = (patient_snapshot(u1), patient_snapshot(u2))
+
+    with pytest.raises(RuntimeError, match="Visit was not active at release"):
+        station.release_services([old_visit], log)
+
+    assert env.now == 5.0
+    assert tuple(station.active) == (current_visit.visit_id,)
+    assert station.active[current_visit.visit_id] is current_visit
+    assert station.resource.users == [current_visit.request]
+    assert station.resource.count == 1
+    assert station.resource.queue == []
+    assert station.waiting == []
+    assert station.release_count == 1
+    assert (patient_snapshot(u1), patient_snapshot(u2)) == before_patients
+    assert log.records == before_log
+
+    env.run()
+    assert run.triggered
+    timeline_events = {
+        "ARRIVAL", "QUEUE_ENTRY", "SERVICE_START",
+        "SERVICE_END", "RESOURCE_RELEASE", "DEPARTURE",
+    }
+    assert [
+        (record.sim_time, record.phase, record.patient_id, record.event_type)
+        for record in log.records
+        if record.event_type in timeline_events
+    ] == [
+        (0.0, 2, "u1", "ARRIVAL"),
+        (0.0, 4, "u1", "QUEUE_ENTRY"),
+        (0.0, 5, "u1", "SERVICE_START"),
+        (1.0, 2, "u2", "ARRIVAL"),
+        (1.0, 4, "u2", "QUEUE_ENTRY"),
+        (4.0, 0, "u1", "SERVICE_END"),
+        (4.0, 1, "u1", "RESOURCE_RELEASE"),
+        (4.0, 3, "u1", "DEPARTURE"),
+        (4.0, 5, "u2", "SERVICE_START"),
+        (8.0, 0, "u2", "SERVICE_END"),
+        (8.0, 1, "u2", "RESOURCE_RELEASE"),
+        (8.0, 3, "u2", "DEPARTURE"),
+    ]
+    entry = only(log.records, "u2", "QUEUE_ENTRY")
+    start = only(log.records, "u2", "SERVICE_START")
+    assert start.sim_time - entry.sim_time == 3.0
+    assert_cleanup(env, station, log, {"u1": u1, "u2": u2}, end_time=8.0)
