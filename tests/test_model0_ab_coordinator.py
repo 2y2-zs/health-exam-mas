@@ -6395,3 +6395,81 @@ def test_run_coordinated_t09_accepts_at_cutoff_and_drains():
     for station in stations.values():
         assert station.waiting == [] and station.active == {}
         assert station.resource.count == 0 and station.resource.queue == []
+
+
+def test_run_coordinated_t02_breaks_same_time_tie_by_patient_rank():
+    """Serve simultaneous P1 arrivals by rank despite reverse registration."""
+    env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture(
+        run_id="AB_T02"
+    )
+    u1 = PatientAgent("u1", 1, P1_CONFIG)
+    u2 = PatientAgent("u2", 2, P1_CONFIG)
+    for patient in (u2, u1):
+        coordinator.register_arrival(ScheduledArrival(0.0, patient))
+
+    run = env.process(coordinator.run())
+    env.run()
+
+    timeline_events = {
+        "ARRIVAL", "TRAVEL_START", "TRAVEL_END", "QUEUE_ENTRY", "SERVICE_START",
+        "SERVICE_END", "RESOURCE_RELEASE", "DEPARTURE",
+    }
+    assert [
+        (
+            record.sim_time, record.phase, record.patient_id,
+            record.event_type, record.station_id,
+        )
+        for record in log.records
+        if record.event_type in timeline_events
+    ] == [
+        (0.0, 2, "u1", "ARRIVAL", None),
+        (0.0, 2, "u2", "ARRIVAL", None),
+        (0.0, 3, "u1", "TRAVEL_START", "A"),
+        (0.0, 3, "u2", "TRAVEL_START", "A"),
+        (0.0, 3, "u1", "TRAVEL_END", "A"),
+        (0.0, 3, "u2", "TRAVEL_END", "A"),
+        (0.0, 4, "u1", "QUEUE_ENTRY", "A"),
+        (0.0, 4, "u2", "QUEUE_ENTRY", "A"),
+        (0.0, 5, "u1", "SERVICE_START", "A"),
+        (4.0, 0, "u1", "SERVICE_END", "A"),
+        (4.0, 1, "u1", "RESOURCE_RELEASE", "A"),
+        (4.0, 3, "u1", "TRAVEL_START", "B"),
+        (4.0, 5, "u2", "SERVICE_START", "A"),
+        (5.0, 3, "u1", "TRAVEL_END", "B"),
+        (5.0, 4, "u1", "QUEUE_ENTRY", "B"),
+        (5.0, 5, "u1", "SERVICE_START", "B"),
+        (8.0, 0, "u2", "SERVICE_END", "A"),
+        (8.0, 0, "u1", "SERVICE_END", "B"),
+        (8.0, 1, "u2", "RESOURCE_RELEASE", "A"),
+        (8.0, 1, "u1", "RESOURCE_RELEASE", "B"),
+        (8.0, 3, "u1", "DEPARTURE", None),
+        (8.0, 3, "u2", "TRAVEL_START", "B"),
+        (9.0, 3, "u2", "TRAVEL_END", "B"),
+        (9.0, 4, "u2", "QUEUE_ENTRY", "B"),
+        (9.0, 5, "u2", "SERVICE_START", "B"),
+        (12.0, 0, "u2", "SERVICE_END", "B"),
+        (12.0, 1, "u2", "RESOURCE_RELEASE", "B"),
+        (12.0, 3, "u2", "DEPARTURE", None),
+    ]
+    u2_a = {
+        record.event_type: record.sim_time
+        for record in log.records
+        if record.patient_id == "u2" and record.station_id == "A"
+    }
+    assert u2_a["SERVICE_START"] - u2_a["QUEUE_ENTRY"] == 4.0
+
+    assert run.triggered
+    assert env.now == 12.0
+    for patient in (u1, u2):
+        assert patient.state == PatientState.FINISHED
+        assert patient.completed_tests == {"A", "B"}
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+
+    assert coordinator.pending_arrivals == coordinator.pending_travels == []
+    assert coordinator.next_event_time() is None
+    for station in (station_a, station_b):
+        assert station.peak_resource_count == station.resource.capacity == 1
+        assert station.release_count == 2
+        assert station.waiting == [] and station.active == {}
+        assert station.resource.count == 0 and station.resource.queue == []
