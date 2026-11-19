@@ -23,13 +23,13 @@ Later packages may use checked literature or authentic hospital public package i
 - [Simulation and Agent specification](docs/MODEL_SPEC.md)
 - [Model assumptions and evidence register](docs/MODEL_ASSUMPTIONS.md)
 - [Model 0 verification plan](docs/VERIFICATION_PLAN.md)
+- [Project progress and evidence](PROJECT_PROGRESS.md)
+- [Interim Poster materials and Gantt chart](poster/README.md)
 - [Codex collaboration guidance](AGENTS.md)
 
 ## Development status
 
-**Design-only initialization.** No core simulation code has been implemented, no verification tests have been executed, and no experimental findings have been generated.
-
-`src/` and `tests/` are placeholders for student-authored assessed work. `requirements.txt` lists planned Python dependencies; pin versions after setting up the development environment.
+`main` holds the design baseline. This development branch contains the native implementation and the [coordinated Model 0 path](src/health_exam_mas/model0_coordinator.py). The coordinated path can run the deterministic fixture from `src/`. Formal acceptance is pending. See [project progress](PROJECT_PROGRESS.md#recorded-development-checks) for the check results and remaining issues.
 
 ## Academic integrity
 

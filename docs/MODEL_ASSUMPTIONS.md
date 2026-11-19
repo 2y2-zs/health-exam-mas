@@ -2,7 +2,7 @@
 
 **Project:** PSP305 — Multi-Agent Simulation and Comparative Evaluation of Queue Scheduling Policies for Daily Health Examination Centres
 
-**Status:** Working design document; NOT a validated operational model  
+**Status:** Working design and evidence register. See [project progress](../PROJECT_PROGRESS.md) for implementation and verification evidence.  
 **Updated:** 2026-11-10
 
 ## 1. Purpose and evidence labels
@@ -18,7 +18,7 @@ Evidence types:
 - **ASSUMPTION — Uncalibrated experimental parameter:** use only with sensitivity tests or subsequent calibration.
 - **TO-CONFIRM — Operational rule or source detail not yet independently verified.**
 
-**Evidence status:** `identified` = relevant publication known; `needs-primary-check` = exact item/table/formulation should be verified from full original source; `needs-hospital-check` = requires partner process/data; `verified-in-code` and `validated-empirically` must only be used after student-led work actually establishes them. None has yet been demonstrated.
+**Evidence status:** `identified` = relevant publication known; `needs-primary-check` = exact item/table/formulation should be verified from full original source; `needs-hospital-check` = requires partner process/data; `verified-in-code` and `validated-empirically` must only be used after student-led work actually establishes them. Current verification evidence is recorded in the [project progress report](../PROJECT_PROGRESS.md).
 
 ## 2. Core research and modelling decisions
 
@@ -36,21 +36,21 @@ Evidence types:
 
 **Every item in this section is SYNTHETIC; none is a medical-centre observation or clinical recommendation.**
 
-| ID | Parameter / rule | Proposed fixture | Why it is used | Status |
+| ID | Parameter / rule | Proposed fixture | Why it is used | Design status |
 |---|---|---|---|---|
 | M0-01 | Stations | A, B, C | Small independently checkable environment | Design-only |
 | M0-02 | Capacities | A=1, B=1, C=2 | Test single/multi-server constraints | Design-only |
 | M0-03 | Service times | A=4, B=3, C=5 minutes, deterministic | Hand-computable event traces | Design-only |
 | M0-04 | Packages | P1={A,B}, P2={B,C}, P3={A,B,C} | Exercise heterogeneous job sets | Design-only |
-| M0-05 | Fixed-route baseline | P1: A->B; P2: B->C; P3: A->B->C | Initial routing-policy fixture; **not** a clinical hard constraint or a queue-policy baseline | Design agreed in §9; not implemented/verified |
-| M0-06 | Precedence example | A must finish before C may begin for P3 | Test legality independently of routing policy; fictitious | T04 negative/positive semantics specified in §9; not executed |
+| M0-05 | Fixed-route baseline | P1: A->B; P2: B->C; P3: A->B->C | Initial routing-policy fixture; **not** a clinical hard constraint or a queue-policy baseline | Design agreed in §9 |
+| M0-06 | Precedence example | A must finish before C may begin for P3 | Test legality independently of routing policy; fictitious | T04 negative/positive semantics specified in §9 |
 | M0-07 | Travel times | A<->B=1; B<->C=1; A<->C=2 minutes; entry->first=0 | Verify travel events and time accounting | Design-only |
 | M0-08 | Queue discipline | Shared FCFS queue; non-preemptive service | Minimal resource model | Design-only |
 | M0-09 | Patient behaviour | B0 full recommendation compliance | Isolate event and capacity correctness | Design-only |
 | M0-10 | Arrivals | Explicit deterministic times | Independent manual expected outcomes | Candidate test schedules/traces documented; student must independently recalculate (§9) |
 | M0-11 | Same-time event ordering, cutoff boundary | Provisional: completions/releases ahead of new admission/queue actions; admit at time <= cutoff | Make expected traces reproducible | **TO-CONFIRM** implementation feasibility and precise priorities in SimPy |
 
-**Test-design clarification (specified in §9, not executed):** Three arrivals at the centre do not necessarily imply three simultaneous arrivals at C when every route goes through B. Resource test T03 uses three simultaneous *eligible service requests at C* in a station-level fixture. T04 includes rejection of an illegal next exam and a positive legality check; simply following the fixed order is insufficient. The student must independently derive expected event times.
+**Test-design clarification (specified in §9):** Three arrivals at the centre do not necessarily imply three simultaneous arrivals at C when every route goes through B. Resource test T03 uses three simultaneous *eligible service requests at C* in a station-level fixture. T04 includes rejection of an illegal next exam and a positive legality check; simply following the fixed order is insufficient. The student must independently derive expected event times.
 
 ### Fixed route vs precedence
 
@@ -143,10 +143,10 @@ This section supersedes any earlier v1.0 phrasing on Model 0 policy, precedence 
 | V11-07 | Native SimPy queue scheduling cannot simply be assumed to enforce all domain phases; full global six-phase coordinator is **optional**, not a compulsory development milestone. | DESIGN implementation choice | Review native process-based and minimal coordination approaches; verify T06 event trace, not just finish times |
 | V11-08 | Admission attempts exactly at time H accepted; later attempts rejected, previously admitted patients continue to completion. | DESIGN synthetic cutoff convention | Test T09; do not use `env.run(until=H)` to truncate the day |
 | V11-09 | One Station Agent owns each visit's queue/token/release; deny duplicate queue entry, completion and release. | DESIGN engineering invariant | Implement and independently test before claiming correctness |
-| V11-10 | T01–T10 have independently checkable **candidate handwritten expected traces**; no tests executed or passed. | SYNTHETIC verification oracle | Student must recalculate and record actual traces |
-| V11-11 | SimPy dependency version and resource/dispatch approach remain unpinned. | TO-CONFIRM | Select version and commit approach before implementation |
+| V11-10 | T01–T10 have independently checkable **candidate handwritten expected traces**. | SYNTHETIC verification oracle | Student must recalculate expected traces and record actual results for Gate 1 |
+| V11-11 | The SimPy version and resource/dispatch approach for the formal Model 0 entry point require confirmation. | TO-CONFIRM | Record the version and approach used for Gate 1 verification |
 
-**Source audit clarification:** `L-DATA` and `H-PUBLIC` identify source types, not a source-checked status. Use a separate proposed `source-checked` status only after actually examining the original full text/table or hospital page. `verified-in-code` and `validated-empirically` are different claims; neither is currently earned.
+**Source audit clarification:** `L-DATA` and `H-PUBLIC` identify source types, not a source-checked status. Use a separate proposed `source-checked` status only after actually examining the original full text/table or hospital page. `verified-in-code` and `validated-empirically` are separate claims and require separate evidence.
 
 - **Munavalli et al. 2020:** multi-agent healthcare coordination is supported; our agent decomposition and active autonomous examinees are project choices, not direct observations from that work.
 - **Ying & Kittipittayakorn 2018:** examination-centre DES + agent-based modelling has precedent; that does not establish that the paper used our Python/SimPy architecture.
@@ -156,13 +156,13 @@ This section supersedes any earlier v1.0 phrasing on Model 0 policy, precedence 
 
 ### Implementation gate
 
-Model 0 v1.1 is **design specified but not implemented, not verified and not empirically validated**. Finalizing an event-handling approach, keeping state and resource ownership coherent, validating negative-case semantics, pinning SimPy version and deriving expected trace oracles independently are prerequisites to claiming Gate 1 completion.
+Model 0 v1.1 has a prototype on the development branch. Gate 1 remains open. Finalizing an event-handling approach, keeping state and resource ownership coherent, validating negative-case semantics, pinning the SimPy version and deriving expected traces independently are prerequisites to closing it. See [project progress](../PROJECT_PROGRESS.md) for the current evidence.
 
 **Queue ownership design risk (not an observed runtime failure):** if a Station Agent's custom waiting list selects service order while native SimPy Resource requests also wait internally, two orderings may conflict. Choose a coherent owner of service selection and verify the custom-queue/resource interaction, capacity and FCFS traces. A full six-phase coordinator remains optional; no implementation approach is established by this warning.
 
 ### Research direction update (2026-11-10)
 
-The working title and RQ2 now concern **Queue Scheduling Policies** (who is served next), separately from Routing (next station). FCFS alone is confirmed; other algorithms, metric definitions and experimental factors remain undecided. Patient Agent state, heterogeneity, observable information, behaviour and interactions remain central to RQ1, with no mandatory complex behaviour. Checked literature/hospital-public packages are allowed with provenance and explicit adaptations. Initial RQ2 may use verified Model 1 + common flow + B0; B1/B2 remain optional hypotheses. These changes do not alter Model 0 numerical rules, T01–T10 or their evidence status: design-only, no executed tests, no experimental findings.
+The working title and RQ2 now concern **Queue Scheduling Policies** (who is served next), separately from Routing (next station). FCFS alone is confirmed; other algorithms, metric definitions and experimental factors remain undecided. Patient Agent state, heterogeneity, observable information, behaviour and interactions remain central to RQ1, with no mandatory complex behaviour. Checked literature/hospital-public packages are allowed with provenance and explicit adaptations. Initial RQ2 may use verified Model 1 + common flow + B0; B1/B2 remain optional hypotheses. This research direction update retained the Model 0 numerical rules and T01–T10. See [project progress](../PROJECT_PROGRESS.md) for subsequent development evidence.
 
 ## 10. Update procedure
 
