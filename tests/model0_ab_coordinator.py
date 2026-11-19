@@ -11,11 +11,10 @@ Supported:
 - Phase 3 positive-duration travel registration, start and completion
 - Phase 3: departure after final service release
 - Arrival, service and travel-completion next-time queries
-- Component-only SimPy generators
+- A/B run loop for preregistered arrivals
 
 Not yet supported:
-- Travel completion integrated into the time-bucket generator
-- Full six-phase run() loop
+- Station C and intake cutoff
 """
 
 from dataclasses import dataclass
@@ -104,8 +103,6 @@ class MultiStationCoordinator:
 
         self.pending_arrivals: list[ScheduledArrival] = []
 
-        # Positive-duration travel plans are registered, not executed.
-        # Scheduling/travel commitment will be handled in a later phase.
         self.pending_travels: list[ScheduledTravel] = []
 
         # Persistent ID history, including consumed arrival plans.
@@ -125,6 +122,7 @@ class MultiStationCoordinator:
         self._ready_for_queue: dict[str, ReadyQueueEntry] = {}
 
         self._pending_final_releases: dict[str, float] = {}
+        self._departed_patient_ids: set[str] = set()
 
     def register_arrival(
         self,
@@ -967,6 +965,7 @@ class MultiStationCoordinator:
                 phase=3,
             )
             del self._pending_final_releases[patient.patient_id]
+            self._departed_patient_ids.add(patient.patient_id)
 
     def next_service_completion_time(self) -> float | None:
         """Pure query: earliest active service completion."""
@@ -1064,3 +1063,71 @@ class MultiStationCoordinator:
             self.stations[station_id].start_available(
                 self.event_log
             )
+
+    def _assert_drained(self) -> None:
+        """Detect domain work left behind when the event calendar is empty."""
+        remaining = self._admitted_patients_by_id.keys() - self._departed_patient_ids
+        busy_stations = [
+            station_id
+            for station_id, station in self.stations.items()
+            if (
+                station.waiting
+                or station.active
+                or station.resource.count
+                or station.resource.queue
+            )
+        ]
+        if (
+            self.pending_arrivals
+            or self.pending_travels
+            or remaining
+            or busy_stations
+            or self._ready_for_queue
+            or self._pending_final_releases
+        ):
+            raise RuntimeError(
+                f"Simulation stalled at t={self.env.now}: "
+                f"patients without departures={sorted(remaining)}, "
+                f"stations with pending work={busy_stations}"
+            )
+
+    def run(self):
+        """Process complete A/B time buckets for preregistered arrivals."""
+        if self._ready_for_queue or self._pending_final_releases:
+            raise RuntimeError(
+                f"Simulation stalled in an incomplete bucket at t={self.env.now}"
+            )
+
+        while True:
+            # Yield only when advancing to the next timestamp.
+            released, arrived = yield from self.process_next_event_bucket()
+
+            # A travel-only bucket has no releases or arrivals.
+            ready = self.commit_due_travels()
+            if not (released or arrived or ready):
+                self._assert_drained()
+                return
+
+            # Finish Phase 3 before submitting queue entries or dispatching.
+            ready.extend(self.route_entry_arrivals(arrived))
+            finished: list[PatientAgent] = []
+            continuing: list[PatientAgent] = []
+            for patient in released:
+                if patient.state == PatientState.FINISHED:
+                    finished.append(patient)
+                elif patient.state == PatientState.NEEDS_ROUTING:
+                    continuing.append(patient)
+                else:
+                    raise RuntimeError(
+                        f"Unexpected state after release for {patient.patient_id!r}: "
+                        f"{patient.state}"
+                    )
+
+            self.commit_departures(finished)
+            for patient in sorted(
+                continuing, key=lambda item: (item.patient_rank, item.patient_id)
+            ):
+                self.start_next_travel(patient)
+
+            self.commit_queue_entries(ready)
+            self.dispatch_available_services()

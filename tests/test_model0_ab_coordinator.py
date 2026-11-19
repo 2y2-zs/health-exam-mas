@@ -96,7 +96,7 @@ def test_ab_coordinator_registration_has_stable_order(
     assert env.now == 0
     assert log.records == []
 
-    assert not hasattr(coordinator, "run")
+    assert callable(coordinator.run)
 
     for station in (station_a, station_b):
         assert station.waiting == []
@@ -5641,3 +5641,161 @@ def test_commit_departures_validates_full_batch_and_orders_by_rank():
         (4.0, 3, "b", "DEPARTURE"),
         (4.0, 3, "a", "DEPARTURE"),
     ]
+
+
+def test_run_coordinated_t01_p1_completes_a_then_b_at_t8():
+    """Drain one P1 from an empty A/B system without manual phase calls."""
+    env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture()
+    patient = PatientAgent("u1", 1, P1_CONFIG)
+    coordinator.register_arrival(ScheduledArrival(0.0, patient))
+    assert log.records == []
+    assert env.now == 0.0
+
+    env.process(coordinator.run())
+    env.run()
+
+    # Manual oracle: A [0,4), A->B [4,5), B [5,8), with zero queue waits.
+    expected = [
+        (0.0, 2, "u1", "ARRIVAL", None),
+        (0.0, 3, "u1", "NEEDS_ROUTING", None),
+        (0.0, 3, "u1", "DECIDING", None),
+        (0.0, 3, "u1", "ROUTE_DECISION", None),
+        (0.0, 3, "u1", "TRAVEL_START", "A"),
+        (0.0, 3, "u1", "TRAVEL_END", "A"),
+        (0.0, 4, "u1", "QUEUE_ENTRY", "A"),
+        (0.0, 5, "u1", "SERVICE_START", "A"),
+        (4.0, 0, "u1", "SERVICE_END", "A"),
+        (4.0, 1, "u1", "RESOURCE_RELEASE", "A"),
+        (4.0, 3, "u1", "DECIDING", None),
+        (4.0, 3, "u1", "ROUTE_DECISION", None),
+        (4.0, 3, "u1", "TRAVEL_START", "B"),
+        (5.0, 3, "u1", "TRAVEL_END", "B"),
+        (5.0, 4, "u1", "QUEUE_ENTRY", "B"),
+        (5.0, 5, "u1", "SERVICE_START", "B"),
+        (8.0, 0, "u1", "SERVICE_END", "B"),
+        (8.0, 1, "u1", "RESOURCE_RELEASE", "B"),
+        (8.0, 3, "u1", "DEPARTURE", None),
+    ]
+    actual = [
+        (record.sim_time, record.phase, record.patient_id,
+         record.event_type, record.station_id)
+        for record in log.records
+    ]
+    assert actual == expected, actual
+    assert [record.sequence_id for record in log.records] == list(range(1, 20))
+    assert [
+        (record.recommended_station, record.chosen_station)
+        for record in log.records if record.event_type == "ROUTE_DECISION"
+    ] == [("A", "A"), ("B", "B")]
+    for station_id in ("A", "B"):
+        events = {
+            record.event_type: record
+            for record in log.records if record.station_id == station_id
+        }
+        assert events["SERVICE_START"].sim_time - events["QUEUE_ENTRY"].sim_time == 0.0
+        assert (
+            events["QUEUE_ENTRY"].visit_id
+            == events["SERVICE_START"].visit_id
+            == events["SERVICE_END"].visit_id
+            == events["RESOURCE_RELEASE"].visit_id
+        )
+
+    assert env.now == 8.0
+    assert patient.state == PatientState.FINISHED
+    assert patient.completed_tests == {"A", "B"}
+    assert patient.location == "B"
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+    assert coordinator.pending_arrivals == []
+    assert coordinator.pending_travels == []
+    assert coordinator.next_event_time() is None
+    for station in (station_a, station_b):
+        assert station.waiting == []
+        assert station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == []
+        assert station.resource.queue == []
+        assert station.release_count == 1
+        assert station.peak_resource_count == 1
+
+
+@pytest.mark.parametrize("paused_at", ["waiting", "admitted", "final_release"])
+def test_run_rejects_stalled_patients_without_mutation(paused_at):
+    """An empty event calendar is not proof that admitted patients departed."""
+    env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture()
+    package = B_ONLY if paused_at == "final_release" else P1_CONFIG
+    patient = PatientAgent("u1", 1, package)
+    coordinator.register_arrival(ScheduledArrival(0.0, patient))
+    arrived = coordinator.commit_due_arrivals()
+    assert len(arrived) == 1 and arrived[0] is patient
+
+    if paused_at != "admitted":
+        ready = coordinator.route_entry_arrivals(arrived)
+        assert coordinator.commit_queue_entries(ready) == [patient]
+
+    if paused_at == "final_release":
+        coordinator.dispatch_available_services()
+        env.run(until=3.0)
+        released = coordinator.complete_due_services()
+        assert len(released) == 1 and released[0] is patient
+        assert patient.state == PatientState.FINISHED
+        assert patient.completed_tests == {"B"}
+    elif paused_at == "waiting":
+        assert patient.state == PatientState.WAITING
+        assert len(station_a.waiting) == 1
+        assert station_a.waiting[0].patient is patient
+    else:
+        assert patient.state == PatientState.ARRIVED
+        assert patient.location == "ENTRY"
+
+    assert coordinator.next_event_time() is None
+    assert not [record for record in log.records if record.event_type == "DEPARTURE"]
+    before_time = env.now
+    before_log = list(log.records)
+    before_arrivals = list(coordinator.pending_arrivals)
+    before_travels = list(coordinator.pending_travels)
+    before_patient = (
+        patient.state, patient.location, set(patient.completed_tests),
+        patient.active_visit_id, patient.active_station_id,
+    )
+    before_stations = [
+        (
+            list(station.waiting), dict(station.active),
+            station.resource.count, list(station.resource.users),
+            list(station.resource.queue), station.release_count,
+            station.peak_resource_count,
+        )
+        for station in (station_a, station_b)
+    ]
+
+    env.process(coordinator.run())
+    with pytest.raises(RuntimeError, match="Simulation stalled"):
+        env.run()
+
+    assert env.now == before_time
+    assert log.records == before_log
+    assert coordinator.pending_arrivals == before_arrivals
+    assert coordinator.pending_travels == before_travels
+    assert (
+        patient.state, patient.location, patient.completed_tests,
+        patient.active_visit_id, patient.active_station_id,
+    ) == before_patient
+    for station, snapshot in zip((station_a, station_b), before_stations):
+        assert (
+            station.waiting, station.active, station.resource.count,
+            station.resource.users, station.resource.queue,
+            station.release_count, station.peak_resource_count,
+        ) == snapshot
+
+
+def test_run_empty_ab_system_drains_without_events():
+    env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture()
+    env.process(coordinator.run())
+    env.run()
+    assert env.now == 0.0
+    assert log.records == []
+    assert coordinator.next_event_time() is None
+    for station in (station_a, station_b):
+        assert station.waiting == [] and station.active == {}
+        assert station.resource.count == 0
+        assert station.resource.users == [] and station.resource.queue == []
