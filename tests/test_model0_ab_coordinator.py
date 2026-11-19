@@ -5463,3 +5463,79 @@ def test_commit_due_travels_consumes_due_but_preserves_future_plan():
         assert station.active == {}
         assert station.resource.count == 0
         assert station.resource.queue == []
+
+
+@pytest.mark.parametrize(
+    ("newcomer_rank", "first_id", "second_id"),
+    [(0, "new", "p1"), (3, "p1", "new")],
+)
+def test_phase5_dispatch_merges_same_time_arrival_and_continuation(
+    newcomer_rank, first_id, second_id
+):
+    """At t=5, B releases its old visit before two new requests compete."""
+    env, coordinator, station_a, station_b, log, p1, old_b, travel = (
+        _prepare_p1_with_active_b_service_at_t4(2.0)
+    )
+    newcomer = PatientAgent("new", newcomer_rank, B_ONLY)
+    coordinator.register_arrival(ScheduledArrival(5.0, newcomer))
+
+    process = env.process(coordinator.process_next_event_bucket())
+    released, arrived = env.run(until=process)
+
+    assert env.now == 5.0
+    assert len(released) == 1 and released[0] is old_b
+    assert len(arrived) == 1 and arrived[0] is newcomer
+    assert old_b.state == PatientState.FINISHED
+    assert station_b.release_count == 1
+    assert coordinator.pending_travels == [travel]
+    assert p1.location == "A"
+
+    due_travellers = coordinator.commit_due_travels()
+    entry_travellers = coordinator.route_entry_arrivals(arrived)
+    assert len(due_travellers) == 1 and due_travellers[0] is p1
+    assert len(entry_travellers) == 1 and entry_travellers[0] is newcomer
+    assert coordinator.pending_travels == []
+    assert station_b.waiting == []
+    assert station_b.resource.count == 0
+
+    queued = coordinator.commit_queue_entries(due_travellers + entry_travellers)
+    assert [patient.patient_id for patient in queued] == [first_id, second_id]
+    assert station_b.resource.count == 0
+    coordinator.dispatch_available_services()
+
+    assert [
+        (r.phase, r.patient_id, r.event_type, r.station_id)
+        for r in log.records
+        if r.sim_time == 5.0
+    ] == [
+        (0, "b_patient", "SERVICE_END", "B"),
+        (1, "b_patient", "RESOURCE_RELEASE", "B"),
+        (2, "new", "ARRIVAL", None),
+        (3, "p1", "TRAVEL_END", "B"),
+        (3, "new", "NEEDS_ROUTING", None),
+        (3, "new", "DECIDING", None),
+        (3, "new", "ROUTE_DECISION", None),
+        (3, "new", "TRAVEL_START", "B"),
+        (3, "new", "TRAVEL_END", "B"),
+        (4, first_id, "QUEUE_ENTRY", "B"),
+        (4, second_id, "QUEUE_ENTRY", "B"),
+        (5, first_id, "SERVICE_START", "B"),
+    ]
+
+    assert env.now == 5.0
+    assert p1.location == newcomer.location == "B"
+    assert p1.completed_tests == {"A"}
+    assert newcomer.completed_tests == set()
+    patients = {"p1": p1, "new": newcomer}
+    assert patients[first_id].state == PatientState.IN_SERVICE
+    assert patients[second_id].state == PatientState.WAITING
+    assert len(station_b.waiting) == 1
+    assert station_b.waiting[0].patient is patients[second_id]
+    assert station_b.waiting[0].entered_at == 5.0
+    assert len(station_b.active) == 1
+    active = next(iter(station_b.active.values()))
+    assert active.patient is patients[first_id]
+    assert active.ends_at == 8.0
+    assert station_b.resource.count == 1
+    assert station_b.resource.queue == []
+    assert station_a.resource.count == 0
