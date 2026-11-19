@@ -6315,3 +6315,83 @@ def test_run_coordinated_t05_counts_travel_separately_from_waiting():
     for station in stations.values():
         assert station.waiting == [] and station.active == {}
         assert station.resource.count == 0 and station.resource.queue == []
+
+
+def test_run_coordinated_t09_accepts_at_cutoff_and_drains():
+    """A rejection-only time bucket leaves admitted patients in service."""
+    env = simpy.Environment()
+    stations = {
+        station_id: AOnlyCoordinatedStation(env, station_id=station_id)
+        for station_id in ("A", "B", "C")
+    }
+    log = EventLog(run_id="ABC_T09")
+    coordinator = MultiStationCoordinator(env, stations, log, intake_cutoff=4.0)
+    u1, u2, u3 = [PatientAgent(f"u{rank}", rank, P1_CONFIG) for rank in (1, 2, 3)]
+    for arrival_time, patient in ((3.0, u1), (4.0, u2), (5.0, u3)):
+        coordinator.register_arrival(ScheduledArrival(arrival_time, patient))
+
+    run = env.process(coordinator.run())
+    # Inspect after the rejection and before the first service completion.
+    env.run(until=6.0)
+    assert not run.triggered
+    assert (u1.state, u2.state) == (PatientState.IN_SERVICE, PatientState.WAITING)
+    assert [
+        (record.phase, record.patient_id, record.event_type, record.station_id)
+        for record in log.records
+        if record.sim_time == 5.0
+    ] == [(2, "u3", "ARRIVAL_REJECTED", None)]
+
+    env.run()
+    assert run.triggered
+    assert env.now == 15.0
+    # ARRIVAL records count admissions; rejected attempts are recorded separately.
+    assert [
+        (record.sim_time, record.phase, record.patient_id, record.event_type)
+        for record in log.records
+        if record.event_type in {"ARRIVAL", "ARRIVAL_REJECTED", "DEPARTURE"}
+    ] == [
+        (3.0, 2, "u1", "ARRIVAL"),
+        (4.0, 2, "u2", "ARRIVAL"),
+        (5.0, 2, "u3", "ARRIVAL_REJECTED"),
+        (11.0, 3, "u1", "DEPARTURE"),
+        (15.0, 3, "u2", "DEPARTURE"),
+    ]
+    assert [
+        (record.sim_time, record.patient_id, record.event_type, record.station_id)
+        for record in log.records
+        if record.event_type in {"QUEUE_ENTRY", "SERVICE_START", "SERVICE_END"}
+    ] == [
+        (3.0, "u1", "QUEUE_ENTRY", "A"),
+        (3.0, "u1", "SERVICE_START", "A"),
+        (4.0, "u2", "QUEUE_ENTRY", "A"),
+        (7.0, "u1", "SERVICE_END", "A"),
+        (7.0, "u2", "SERVICE_START", "A"),
+        (8.0, "u1", "QUEUE_ENTRY", "B"),
+        (8.0, "u1", "SERVICE_START", "B"),
+        (11.0, "u2", "SERVICE_END", "A"),
+        (11.0, "u1", "SERVICE_END", "B"),
+        (12.0, "u2", "QUEUE_ENTRY", "B"),
+        (12.0, "u2", "SERVICE_START", "B"),
+        (15.0, "u2", "SERVICE_END", "B"),
+    ]
+
+    assert [
+        record.event_type for record in log.records if record.patient_id == "u3"
+    ] == ["ARRIVAL_REJECTED"]
+    assert u3.location == ENTRY_LOCATION
+    assert u3.completed_tests == set()
+    for patient in (u1, u2):
+        assert patient.state == PatientState.FINISHED
+        assert patient.completed_tests == {"A", "B"}
+    for patient in (u1, u2, u3):
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+
+    assert coordinator.pending_arrivals == coordinator.pending_travels == []
+    assert coordinator.next_event_time() is None
+    assert [stations[station_id].release_count for station_id in ("A", "B", "C")] == [
+        2, 2, 0,
+    ]
+    for station in stations.values():
+        assert station.waiting == [] and station.active == {}
+        assert station.resource.count == 0 and station.resource.queue == []

@@ -4,19 +4,18 @@
 Supported:
 - A/B or A/B/C registration and environment validation
 - Phase 0/1: batch service completion and release
-- Phase 2: batch arrival commitment
+- Phase 2: batch admission with an optional inclusive cutoff
 - Phase 3: validated zero-time entry routing and travel
 - Phase 4: atomic prevalidation and deterministic queue commitment
 - Phase 5: synchronous service dispatch
 - Phase 3 positive-duration travel registration, start and completion
 - Phase 3: departure after final service release
 - Arrival, service and travel-completion next-time queries
-- A/B run loop for preregistered arrivals
-
-Three-station flow verification and intake cutoff are pending.
+- Run loop for preregistered arrivals with drain-to-completion
 """
 
 from dataclasses import dataclass
+from math import isfinite
 
 import simpy
 
@@ -57,6 +56,8 @@ class MultiStationCoordinator:
         env: simpy.Environment,
         stations: dict[str, AOnlyCoordinatedStation],
         event_log: EventLog,
+        *,
+        intake_cutoff: float | None = None,
     ) -> None:
         if not isinstance(stations, dict):
             raise TypeError("stations must be a dictionary")
@@ -93,8 +94,14 @@ class MultiStationCoordinator:
                     "the Coordinator Environment"
                 )
 
+        if intake_cutoff is not None and (
+            not isfinite(intake_cutoff) or intake_cutoff < 0
+        ):
+            raise ValueError("intake_cutoff must be finite and nonnegative")
+
         self.env = env
         self.event_log = event_log
+        self.intake_cutoff = intake_cutoff
 
         self.station_ids = station_ids
 
@@ -474,7 +481,7 @@ class MultiStationCoordinator:
         return [travel.patient for travel in due]
 
     def commit_due_arrivals(self) -> list[PatientAgent]:
-        """Phase 2: validate and commit all arrivals due at env.now."""
+        """Phase 2: log due attempts and return the patients admitted now."""
 
         now = self.env.now
 
@@ -496,7 +503,7 @@ class MultiStationCoordinator:
             ),
         )
 
-        # Complete prevalidation before the first ARRIVAL record.
+        # Validate the whole batch before recording any outcome.
         seen_ids: set[str] = set()
 
         for arrival in due:
@@ -540,16 +547,15 @@ class MultiStationCoordinator:
                     f"Patient {patient_id!r} already has an active visit"
                 )
 
-        # Commit every ARRIVAL in stable order.
+        intake_open = self.intake_cutoff is None or now <= self.intake_cutoff
+        event_type = "ARRIVAL" if intake_open else "ARRIVAL_REJECTED"
+        new_state = PatientState.ARRIVED if intake_open else None
         for arrival in due:
-            patient = arrival.patient
-
             self.event_log.record(
                 sim_time=now,
-                event_type="ARRIVAL",
-                patient_id=patient.patient_id,
-                prior_state=None,
-                new_state=PatientState.ARRIVED,
+                event_type=event_type,
+                patient_id=arrival.patient.patient_id,
+                new_state=new_state,
                 phase=2,
             )
 
@@ -560,15 +566,11 @@ class MultiStationCoordinator:
             if arrival.at != now
         ]
 
-        # Phase 3 must be able to distinguish an actually admitted
-        # patient from a merely registered or duplicate-ID object.
-        for arrival in due:
-            patient = arrival.patient
-            self._admitted_patients_by_id[
-                patient.patient_id
-            ] = patient
-
-        return [arrival.patient for arrival in due]
+        # Phase 3 only receives patients admitted in this batch.
+        admitted = [arrival.patient for arrival in due] if intake_open else []
+        for patient in admitted:
+            self._admitted_patients_by_id[patient.patient_id] = patient
+        return admitted
 
     def route_entry_arrivals(
         self,
@@ -1107,6 +1109,10 @@ class MultiStationCoordinator:
             # A travel-only bucket has no releases or arrivals.
             ready = self.commit_due_travels()
             if not (released or arrived or ready):
+                # A rejection-only bucket can precede more scheduled work.
+                next_time = self.next_event_time()
+                if next_time is not None and next_time > self.env.now:
+                    continue
                 self._assert_drained()
                 return
 
