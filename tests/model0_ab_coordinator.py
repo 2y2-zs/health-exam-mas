@@ -1,8 +1,8 @@
 
-"""A/B multi-station Coordinator: incremental coordination prototype.
+"""Multi-station coordination prototype with deterministic phases.
 
 Supported:
-- A/B registration and Environment validation
+- A/B or A/B/C registration and environment validation
 - Phase 0/1: batch service completion and release
 - Phase 2: batch arrival commitment
 - Phase 3: validated zero-time entry routing and travel
@@ -13,8 +13,7 @@ Supported:
 - Arrival, service and travel-completion next-time queries
 - A/B run loop for preregistered arrivals
 
-Not yet supported:
-- Station C and intake cutoff
+Three-station flow verification and intake cutoff are pending.
 """
 
 from dataclasses import dataclass
@@ -49,9 +48,9 @@ class ReadyQueueEntry:
 
 
 class MultiStationCoordinator:
-    """Manage A/B using deterministic, separately callable phases."""
+    """Manage registered stations using separately callable phases."""
 
-    STATION_ORDER = ("A", "B")
+    STATION_ORDER = ("A", "B", "C")
 
     def __init__(
         self,
@@ -62,12 +61,15 @@ class MultiStationCoordinator:
         if not isinstance(stations, dict):
             raise TypeError("stations must be a dictionary")
 
-        if set(stations) != set(self.STATION_ORDER):
+        if set(stations) not in ({"A", "B"}, set(self.STATION_ORDER)):
             raise ValueError(
-                "MultiStationCoordinator requires exactly stations A and B"
+                "MultiStationCoordinator requires stations A and B, with C optional"
             )
 
-        for station_id in self.STATION_ORDER:
+        station_ids = tuple(
+            station_id for station_id in self.STATION_ORDER if station_id in stations
+        )
+        for station_id in station_ids:
             station = stations[station_id]
 
             if not isinstance(
@@ -94,7 +96,7 @@ class MultiStationCoordinator:
         self.env = env
         self.event_log = event_log
 
-        self.station_ids: tuple[str, str] = self.STATION_ORDER
+        self.station_ids = station_ids
 
         self.stations: dict[str, AOnlyCoordinatedStation] = {
             station_id: stations[station_id]
@@ -661,7 +663,7 @@ class MultiStationCoordinator:
             if destination not in self.stations:
                 raise ValueError(
                     f"Entry route destination {destination!r} "
-                    "is not managed by this A/B Coordinator"
+                    "is not managed by this Coordinator"
                 )
 
             if destination not in eligible_stations(
@@ -770,7 +772,7 @@ class MultiStationCoordinator:
         self,
         ready_patients: list[PatientAgent],
     ) -> list[PatientAgent]:
-        """Phase 4: batch-enqueue completed travels, A then B.
+        """Phase 4: batch-enqueue completed travels in station order.
 
         Validate the ENTIRE batch without side effects before starting
         any Station.enqueue call. Every patient must have a matching,
@@ -829,7 +831,7 @@ class MultiStationCoordinator:
             if destination not in self.stations:
                 raise ValueError(
                     f"Queue destination {destination!r} "
-                    "is not managed by this A/B Coordinator"
+                    "is not managed by this Coordinator"
                 )
 
             if ready.travel_ended_at != now:
@@ -1057,7 +1059,7 @@ class MultiStationCoordinator:
         return (released, arrived)
 
     def dispatch_available_services(self) -> None:
-        """Phase 5: synchronously start services, A then B."""
+        """Phase 5: synchronously start services in station order."""
 
         for station_id in self.station_ids:
             self.stations[station_id].start_available(
@@ -1092,7 +1094,7 @@ class MultiStationCoordinator:
             )
 
     def run(self):
-        """Process complete A/B time buckets for preregistered arrivals."""
+        """Process complete time buckets for preregistered arrivals."""
         if self._ready_for_queue or self._pending_final_releases:
             raise RuntimeError(
                 f"Simulation stalled in an incomplete bucket at t={self.env.now}"

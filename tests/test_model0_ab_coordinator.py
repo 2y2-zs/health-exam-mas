@@ -1,5 +1,5 @@
 
-"""Tests for A/B multi-station coordination components and boundaries."""
+"""Tests for multi-station coordination components and boundaries."""
 
 from dataclasses import replace
 
@@ -112,24 +112,47 @@ def test_ab_coordinator_registration_has_stable_order(
         assert station.peak_resource_count == 0
 
 
+@pytest.mark.parametrize("insertion_order", [("A", "B", "C"), ("C", "B", "A")])
+def test_abc_coordinator_registers_c_in_stable_order(insertion_order):
+    """Register C with the Model 0 capacity and service duration."""
+
+    env = simpy.Environment()
+    stations = {
+        station_id: AOnlyCoordinatedStation(env, station_id=station_id)
+        for station_id in insertion_order
+    }
+    log = EventLog(run_id="ABC_INIT")
+    coordinator = MultiStationCoordinator(env, stations, log)
+
+    assert coordinator.station_ids == ("A", "B", "C")
+    assert tuple(coordinator.stations) == ("A", "B", "C")
+    station_c = coordinator.stations["C"]
+    assert station_c is stations["C"]
+    assert station_c.config.capacity == station_c.resource.capacity == 2
+    assert station_c.config.service_duration == 5.0
+    assert station_c.waiting == [] and station_c.active == {}
+    assert station_c.resource.count == 0 and station_c.resource.queue == []
+    assert env.now == 0
+    assert log.records == []
+
+
 @pytest.mark.parametrize(
-    "foreign_station",
+    ("station_ids", "foreign_station"),
     [
-        "A",
-        "B",
+        (("A", "B"), "A"),
+        (("A", "B"), "B"),
+        (("A", "B", "C"), "C"),
     ],
 )
-def test_ab_coordinator_rejects_different_environments(
-    foreign_station,
-):
-    """A and B must share the exact Coordinator Environment."""
+def test_coordinator_rejects_different_environments(station_ids, foreign_station):
+    """Each station must share the Coordinator Environment."""
 
     env = simpy.Environment()
     other_env = simpy.Environment()
 
     stations = {
-        "A": AOnlyCoordinatedStation(env, station_id="A"),
-        "B": AOnlyCoordinatedStation(env, station_id="B"),
+        station_id: AOnlyCoordinatedStation(env, station_id=station_id)
+        for station_id in station_ids
     }
 
     stations[foreign_station] = AOnlyCoordinatedStation(
@@ -155,30 +178,22 @@ def test_ab_coordinator_rejects_different_environments(
 
 
 @pytest.mark.parametrize(
-    "wrong_key",
+    ("station_ids", "wrong_key", "other_station"),
     [
-        "A",
-        "B",
+        (("A", "B"), "A", "B"),
+        (("A", "B"), "B", "A"),
+        (("A", "B", "C"), "C", "A"),
     ],
 )
-def test_ab_coordinator_rejects_station_id_mismatch(
-    wrong_key,
-):
-    """A dictionary key must match the Station's station_id."""
+def test_coordinator_rejects_station_id_mismatch(station_ids, wrong_key, other_station):
+    """A dictionary key must match the station's ID."""
 
     env = simpy.Environment()
-
-    station_a = AOnlyCoordinatedStation(env, station_id="A")
-    station_b = AOnlyCoordinatedStation(env, station_id="B")
-
     stations = {
-        "A": station_a,
-        "B": station_b,
+        station_id: AOnlyCoordinatedStation(env, station_id=station_id)
+        for station_id in station_ids
     }
-
-    stations[wrong_key] = (
-        station_b if wrong_key == "A" else station_a
-    )
+    stations[wrong_key] = stations[other_station]
 
     log = EventLog(run_id="AB_INIT_KEY_MISMATCH")
 
@@ -201,20 +216,19 @@ def test_ab_coordinator_rejects_station_id_mismatch(
     [
         ("A",),
         ("B",),
-        ("A", "B", "C"),
+        ("A", "C"),
+        ("B", "C"),
+        ("A", "B", "C", "D"),
     ],
 )
-def test_ab_coordinator_rejects_missing_or_extra_stations(
-    keys,
-):
-    """The registry must contain exactly A and B."""
+def test_coordinator_rejects_missing_or_extra_stations(keys):
+    """The registry requires A and B and accepts C as the third station."""
 
     env = simpy.Environment()
-
     stations = {
         station_id: AOnlyCoordinatedStation(
             env,
-            station_id=station_id,
+            station_id="A" if station_id == "D" else station_id,
         )
         for station_id in keys
     }
@@ -223,7 +237,7 @@ def test_ab_coordinator_rejects_missing_or_extra_stations(
 
     with pytest.raises(
         ValueError,
-        match="exactly stations A and B",
+        match="requires stations A and B, with C optional",
     ):
         MultiStationCoordinator(
             env=env,
