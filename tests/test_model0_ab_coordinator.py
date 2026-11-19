@@ -5799,3 +5799,89 @@ def test_run_empty_ab_system_drains_without_events():
         assert station.waiting == [] and station.active == {}
         assert station.resource.count == 0
         assert station.resource.users == [] and station.resource.queue == []
+
+
+def test_run_coordinated_t06_serves_existing_waiter_first():
+    """Reproduce T06 with simultaneous A release and two arrivals at t=4."""
+    env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture()
+    patients = {
+        f"u{rank}": PatientAgent(f"u{rank}", rank, P1_CONFIG)
+        for rank in range(1, 5)
+    }
+    for patient_id, arrival_time in (("u1", 0), ("u2", 1), ("u4", 4), ("u3", 4)):
+        coordinator.register_arrival(
+            ScheduledArrival(float(arrival_time), patients[patient_id])
+        )
+
+    run = env.process(coordinator.run())
+    env.run()
+
+    assert run.triggered
+    assert env.now == 20.0
+    assert [r.sequence_id for r in log.records] == list(range(1, len(log.records) + 1))
+    for before, after in zip(log.records, log.records[1:]):
+        assert (before.sim_time, before.phase) <= (after.sim_time, after.phase)
+
+    assert [(r.patient_id, r.sim_time) for r in log.records if r.event_type == "ARRIVAL"] == [
+        ("u1", 0.0), ("u2", 1.0), ("u3", 4.0), ("u4", 4.0),
+    ]
+    t4 = [r for r in log.records if r.sim_time == 4.0]
+    assert [
+        (r.phase, r.patient_id, r.event_type, r.station_id)
+        for r in t4 if r.phase != 3
+    ] == [
+        (0, "u1", "SERVICE_END", "A"),
+        (1, "u1", "RESOURCE_RELEASE", "A"),
+        (2, "u3", "ARRIVAL", None),
+        (2, "u4", "ARRIVAL", None),
+        (4, "u3", "QUEUE_ENTRY", "A"),
+        (4, "u4", "QUEUE_ENTRY", "A"),
+        (5, "u2", "SERVICE_START", "A"),
+    ]
+    assert [
+        (r.phase, r.patient_id, r.station_id)
+        for r in t4 if r.event_type == "TRAVEL_END"
+    ] == [(3, "u3", "A"), (3, "u4", "A")]
+
+    # Expected queue, service start and release times from the T06 trace.
+    expected_visits = [
+        ("u1", "A", 0.0, 0.0, 4.0),
+        ("u2", "A", 1.0, 4.0, 8.0),
+        ("u3", "A", 4.0, 8.0, 12.0),
+        ("u4", "A", 4.0, 12.0, 16.0),
+        ("u1", "B", 5.0, 5.0, 8.0),
+        ("u2", "B", 9.0, 9.0, 12.0),
+        ("u3", "B", 13.0, 13.0, 16.0),
+        ("u4", "B", 17.0, 17.0, 20.0),
+    ]
+    visit_events = {"QUEUE_ENTRY", "SERVICE_START", "SERVICE_END", "RESOURCE_RELEASE"}
+    for patient_id, station_id, queued_at, start, end in expected_visits:
+        records = [
+            r for r in log.records
+            if r.patient_id == patient_id and r.station_id == station_id
+            and r.event_type in visit_events
+        ]
+        assert [(r.sim_time, r.phase, r.event_type) for r in records] == [
+            (queued_at, 4, "QUEUE_ENTRY"),
+            (start, 5, "SERVICE_START"),
+            (end, 0, "SERVICE_END"),
+            (end, 1, "RESOURCE_RELEASE"),
+        ], (patient_id, station_id)
+        assert records[0].visit_id is not None
+        assert all(r.visit_id == records[0].visit_id for r in records)
+
+    assert [
+        (r.patient_id, r.sim_time, r.phase)
+        for r in log.records if r.event_type == "DEPARTURE"
+    ] == [("u1", 8.0, 3), ("u2", 12.0, 3), ("u3", 16.0, 3), ("u4", 20.0, 3)]
+    for patient in patients.values():
+        assert patient.state == PatientState.FINISHED
+        assert patient.completed_tests == {"A", "B"}
+        assert patient.active_visit_id is None
+        assert patient.active_station_id is None
+    assert coordinator.pending_arrivals == coordinator.pending_travels == []
+    assert coordinator.next_event_time() is None
+    for station in (station_a, station_b):
+        assert station.waiting == [] and station.active == {}
+        assert station.resource.count == 0 and station.resource.queue == []
+        assert station.release_count == 4 and station.peak_resource_count == 1
