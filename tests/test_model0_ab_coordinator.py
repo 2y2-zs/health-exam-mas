@@ -7,10 +7,12 @@ import pytest
 import simpy
 
 from health_exam_mas.model0 import (
+    ENTRY_LOCATION,
     EventLog,
     PackageConfig,
     PatientAgent,
     PatientState,
+    eligible_stations,
 )
 
 from model0_a_only_prototype import (
@@ -6097,3 +6099,115 @@ def test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter():
     for station in stations.values():
         assert station.waiting == [] and station.active == {}
         assert station.resource.count == 0 and station.resource.queue == []
+
+
+def _make_coordinated_t04_scenario(fixed_route: tuple[str, ...]):
+    env = simpy.Environment()
+    stations = {
+        station_id: AOnlyCoordinatedStation(env, station_id=station_id)
+        for station_id in ("A", "B", "C")
+    }
+    log = EventLog(run_id="ABC_T04")
+    coordinator = MultiStationCoordinator(env, stations, log)
+    package = PackageConfig(
+        required_tests=frozenset({"A", "B", "C"}),
+        fixed_route=fixed_route,
+        hard_precedence=frozenset({("A", "C")}),
+    )
+    patient = PatientAgent("u1", 1, package)
+    coordinator.register_arrival(ScheduledArrival(0.0, patient))
+    return env, coordinator, stations, log, patient
+
+
+def test_run_coordinated_t04_rejects_illegal_recommendation(monkeypatch):
+    """Reject C at entry even when the routing policy recommends it."""
+    env, coordinator, stations, log, patient = _make_coordinated_t04_scenario(
+        ("A", "B", "C")
+    )
+    assert eligible_stations(patient.package, patient.completed_tests) == {"A", "B"}
+
+    monkeypatch.setattr(
+        "model0_ab_coordinator.recommend_fixed_route",
+        lambda package, completed_tests: "C",
+    )
+    env.process(coordinator.run())
+    with pytest.raises(ValueError, match=r"Entry route destination 'C' is not eligible"):
+        env.run()
+
+    assert env.now == 0.0
+    assert [
+        (record.sim_time, record.phase, record.patient_id, record.event_type)
+        for record in log.records
+    ] == [(0.0, 2, "u1", "ARRIVAL")]
+    assert patient.state == PatientState.ARRIVED
+    assert patient.location == ENTRY_LOCATION
+    assert patient.completed_tests == set()
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+    assert coordinator.pending_travels == []
+    for station in stations.values():
+        assert station.waiting == [] and station.active == {}
+        assert station.resource.count == 0 and station.resource.queue == []
+        assert station.release_count == station.peak_resource_count == 0
+
+
+def test_run_coordinated_t04_allows_alternative_route_a_c_b():
+    """Complete A, C, B under the same A-before-C precedence rule."""
+    env, coordinator, stations, log, patient = _make_coordinated_t04_scenario(
+        ("A", "C", "B")
+    )
+    assert eligible_stations(patient.package, patient.completed_tests) == {"A", "B"}
+    assert eligible_stations(patient.package, {"A"}) == {"B", "C"}
+
+    run = env.process(coordinator.run())
+    env.run()
+
+    timeline_events = {
+        "ARRIVAL", "TRAVEL_START", "TRAVEL_END", "QUEUE_ENTRY", "SERVICE_START",
+        "SERVICE_END", "RESOURCE_RELEASE", "DEPARTURE",
+    }
+    assert [
+        (record.sim_time, record.phase, record.event_type, record.station_id)
+        for record in log.records
+        if record.event_type in timeline_events
+    ] == [
+        (0.0, 2, "ARRIVAL", None),
+        (0.0, 3, "TRAVEL_START", "A"),
+        (0.0, 3, "TRAVEL_END", "A"),
+        (0.0, 4, "QUEUE_ENTRY", "A"),
+        (0.0, 5, "SERVICE_START", "A"),
+        (4.0, 0, "SERVICE_END", "A"),
+        (4.0, 1, "RESOURCE_RELEASE", "A"),
+        (4.0, 3, "TRAVEL_START", "C"),
+        (6.0, 3, "TRAVEL_END", "C"),
+        (6.0, 4, "QUEUE_ENTRY", "C"),
+        (6.0, 5, "SERVICE_START", "C"),
+        (11.0, 0, "SERVICE_END", "C"),
+        (11.0, 1, "RESOURCE_RELEASE", "C"),
+        (11.0, 3, "TRAVEL_START", "B"),
+        (12.0, 3, "TRAVEL_END", "B"),
+        (12.0, 4, "QUEUE_ENTRY", "B"),
+        (12.0, 5, "SERVICE_START", "B"),
+        (15.0, 0, "SERVICE_END", "B"),
+        (15.0, 1, "RESOURCE_RELEASE", "B"),
+        (15.0, 3, "DEPARTURE", None),
+    ]
+    assert [
+        (record.recommended_station, record.chosen_station)
+        for record in log.records
+        if record.event_type == "ROUTE_DECISION"
+    ] == [("A", "A"), ("C", "C"), ("B", "B")]
+    assert all(record.patient_id == "u1" for record in log.records)
+
+    assert run.triggered
+    assert env.now == 15.0
+    assert patient.state == PatientState.FINISHED
+    assert patient.completed_tests == {"A", "B", "C"}
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+    assert coordinator.pending_arrivals == coordinator.pending_travels == []
+    assert coordinator.next_event_time() is None
+    for station in stations.values():
+        assert station.waiting == [] and station.active == {}
+        assert station.resource.count == 0 and station.resource.queue == []
+        assert station.release_count == 1
