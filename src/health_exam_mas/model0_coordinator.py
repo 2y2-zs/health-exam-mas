@@ -1,5 +1,5 @@
 
-"""Multi-station coordination prototype with deterministic phases.
+"""Multi-station coordination for the deterministic Model 0 fixture.
 
 Supported:
 - A/B or A/B/C registration and environment validation
@@ -19,7 +19,7 @@ from math import isfinite
 
 import simpy
 
-from health_exam_mas.model0 import (
+from .model0 import (
     ENTRY_LOCATION,
     MODEL0_TRAVEL_TIMES,
     EventLog,
@@ -30,11 +30,22 @@ from health_exam_mas.model0 import (
     transition_patient_state,
 )
 
-from model0_a_only_prototype import (
-    AOnlyCoordinatedStation,
-    ScheduledArrival,
-    ScheduledTravel,
-)
+from .model0_station import AOnlyCoordinatedStation
+
+
+@dataclass(frozen=True)
+class ScheduledArrival:
+    at: float
+    patient: PatientAgent
+
+
+@dataclass(frozen=True)
+class ScheduledTravel:
+    patient: PatientAgent
+    origin: str
+    destination: str
+    started_at: float
+    ends_at: float
 
 
 @dataclass(frozen=True)

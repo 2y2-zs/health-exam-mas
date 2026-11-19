@@ -15,13 +15,13 @@ from health_exam_mas.model0 import (
     eligible_stations,
 )
 
-from model0_a_only_prototype import (
-    AOnlyCoordinatedStation,
+from health_exam_mas.model0_coordinator import (
+    MultiStationCoordinator,
+    ReadyQueueEntry,
     ScheduledArrival,
     ScheduledTravel,
 )
-
-from model0_ab_coordinator import MultiStationCoordinator, ReadyQueueEntry
+from health_exam_mas.model0_station import AOnlyCoordinatedStation
 
 
 A_ONLY = PackageConfig(
@@ -6127,7 +6127,7 @@ def test_run_coordinated_t04_rejects_illegal_recommendation(monkeypatch):
     assert eligible_stations(patient.package, patient.completed_tests) == {"A", "B"}
 
     monkeypatch.setattr(
-        "model0_ab_coordinator.recommend_fixed_route",
+        "health_exam_mas.model0_coordinator.recommend_fixed_route",
         lambda package, completed_tests: "C",
     )
     env.process(coordinator.run())

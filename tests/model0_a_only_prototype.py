@@ -6,7 +6,6 @@ zero-time; registered positive-duration travel joins the same station queue.
 This is separate from the native processes; multi-station flow is still pending.
 """
 
-from dataclasses import dataclass
 from typing import Iterable
 
 import simpy
@@ -22,22 +21,8 @@ from health_exam_mas.model0 import (
     recommend_fixed_route,
     transition_patient_state,
 )
+from health_exam_mas.model0_coordinator import ScheduledArrival, ScheduledTravel
 from health_exam_mas.model0_station import ActiveVisit, AOnlyCoordinatedStation
-
-
-@dataclass(frozen=True)
-class ScheduledArrival:
-    at: float
-    patient: PatientAgent
-
-
-@dataclass(frozen=True)
-class ScheduledTravel:
-    patient: PatientAgent
-    origin: str
-    destination: str
-    started_at: float
-    ends_at: float
 
 
 class AOnlyCoordinator:
