@@ -47,8 +47,10 @@ The references remain a reading list, not a verified queue-policy catalogue. A p
 ## Schedule
 
 - Interim Poster Presentation (poster + video): 2026-12-16 12:00 (PSP305 Module Handbook, 2026/27, PDF p. 4).
-- Oral demonstration: 2027-04-05.
-- Dissertation: 2027-05-09.
+- Oral Project Demonstration: 2027-04-05 23:59 (PSP305 Module Handbook, 2026/27, PDF p. 6).
+- Dissertation: 2027-05-09 23:59 (PSP305 Module Handbook, 2026/27, PDF p. 6).
+
+See the [project Gantt chart](../poster/gantt.md) for internal milestones, including the target for sending the Dissertation draft to the supervisor.
 
 ## Academic integrity
 

@@ -70,7 +70,7 @@ A successful visit has a unique `(patient_id, station_id, visit_id)`. Each requi
 
 Within same phase, use stable station order **A,B,C** where applicable and fixed patient rank `u1 < u2 < u3 < ...`. Causal prerequisites always precede dependent actions. A waiting patient already queued at t'<t cannot be overtaken by a new t request. If a route/departure decision is enabled by a completion at t, it is processed only after phase 1 state commit.
 
-**Status: semantics proposed, implementation mechanism PENDING.** Do **not** assume native SimPy event processing intrinsically obeys these hospital/domain phases. SimPy schedules events by time, priority and insertion order; native Resource request/release callbacks may execute in different micro-orders. A full six-phase coordinator is **not mandatory at project outset**. The student should choose and document the smallest correct event coordination approach, then demonstrate with T06 and other same-time tests that the **observable domain outcome AND event trace** meet the selected semantics. If simple native processes cannot enforce the intended contract, either explicitly revise the domain rule and rederive the expected traces **before experiments**, or add suitable coordination. Merely sorting logged events afterwards does not count.
+**Implementation status:** The development branch has a coordinated prototype. Acceptance through the formal Model 0 entry point is pending. See [project progress](../PROJECT_PROGRESS.md) for evidence. Do **not** assume native SimPy event processing intrinsically obeys these hospital/domain phases. SimPy schedules events by time, priority and insertion order; native Resource request/release callbacks may execute in different micro-orders. A full six-phase coordinator is **not mandatory at project outset**. The student should choose and document the smallest correct event coordination approach, then demonstrate with T06 and other same-time tests that the **observable domain outcome AND event trace** meet the selected semantics. If simple native processes cannot enforce the intended contract, either explicitly revise the domain rule and rederive the expected traces **before experiments**, or add suitable coordination. Merely sorting logged events afterwards does not count.
 
 Intake closes at synthetic cutoff H with **inclusive admission at t=H**; no patient first arriving after H is admitted. Existing admitted patients may finish after H. Do not use `env.run(until=H)` as the whole simulation termination rule. Run until the intake is closed/all attempts considered and all admitted patients have FINISHED, with no waiting or active services. Detect stalled patients; a bare empty event queue alone is not sufficient evidence of success.
 
@@ -104,7 +104,7 @@ Compare matched exogenous arrivals, packages and per-patient/station service dem
 
 ## 8. Status
 
-Model 0 v1.1: **design specified, pending student review of expected traces and SimPy mapping; not implemented; not verified**.
+Model 0 v1.1: **design baseline on `main`**. Implementation and tests are on the development branch. See [project progress](../PROJECT_PROGRESS.md) for the verification evidence and outstanding checks.
 Model 1 and Model 2: candidate design only, not calibrated or validated.
 RQ2: station queue-scheduling focus specified; FCFS baseline defined, other policies and experiment details pending. Model 2 is an optional behavioural extension, not a universal RQ2 prerequisite.
-No experiments, test passes or empirical conclusions have been produced.
+Research experiments and empirical validation are pending.
