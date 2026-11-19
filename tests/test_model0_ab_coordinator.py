@@ -5942,3 +5942,79 @@ def test_run_coordinated_t10_reproduces_event_trace():
         traces.append([replace(record, run_id="") for record in log.records])
 
     assert traces[0] == traces[1]
+
+
+def test_run_coordinated_t07_p3_departs_after_c_release():
+    """Complete the fixed P3 route and stop after the final departure."""
+    env = simpy.Environment()
+    stations = {
+        station_id: AOnlyCoordinatedStation(env, station_id=station_id)
+        for station_id in ("A", "B", "C")
+    }
+    log = EventLog(run_id="ABC_T07")
+    coordinator = MultiStationCoordinator(env, stations, log)
+    package = PackageConfig(
+        required_tests=frozenset({"A", "B", "C"}),
+        fixed_route=("A", "B", "C"),
+        hard_precedence=frozenset({("A", "C")}),
+    )
+    patient = PatientAgent("u1", 1, package)
+    coordinator.register_arrival(ScheduledArrival(0.0, patient))
+
+    run = env.process(coordinator.run())
+    env.run()
+
+    assert run.triggered
+    assert env.now == 14.0
+    assert all(record.patient_id == "u1" for record in log.records)
+
+    # Manual T07 timeline in the order the coordinator commits events.
+    assert [
+        (record.sim_time, record.phase, record.event_type, record.station_id)
+        for record in log.records
+    ] == [
+        (0.0, 2, "ARRIVAL", None),
+        (0.0, 3, "NEEDS_ROUTING", None),
+        (0.0, 3, "DECIDING", None),
+        (0.0, 3, "ROUTE_DECISION", None),
+        (0.0, 3, "TRAVEL_START", "A"),
+        (0.0, 3, "TRAVEL_END", "A"),
+        (0.0, 4, "QUEUE_ENTRY", "A"),
+        (0.0, 5, "SERVICE_START", "A"),
+        (4.0, 0, "SERVICE_END", "A"),
+        (4.0, 1, "RESOURCE_RELEASE", "A"),
+        (4.0, 3, "DECIDING", None),
+        (4.0, 3, "ROUTE_DECISION", None),
+        (4.0, 3, "TRAVEL_START", "B"),
+        (5.0, 3, "TRAVEL_END", "B"),
+        (5.0, 4, "QUEUE_ENTRY", "B"),
+        (5.0, 5, "SERVICE_START", "B"),
+        (8.0, 0, "SERVICE_END", "B"),
+        (8.0, 1, "RESOURCE_RELEASE", "B"),
+        (8.0, 3, "DECIDING", None),
+        (8.0, 3, "ROUTE_DECISION", None),
+        (8.0, 3, "TRAVEL_START", "C"),
+        (9.0, 3, "TRAVEL_END", "C"),
+        (9.0, 4, "QUEUE_ENTRY", "C"),
+        (9.0, 5, "SERVICE_START", "C"),
+        (14.0, 0, "SERVICE_END", "C"),
+        (14.0, 1, "RESOURCE_RELEASE", "C"),
+        (14.0, 3, "DEPARTURE", None),
+    ]
+    assert [
+        (record.recommended_station, record.chosen_station)
+        for record in log.records
+        if record.event_type == "ROUTE_DECISION"
+    ] == [("A", "A"), ("B", "B"), ("C", "C")]
+
+    assert log.records[-2].new_state == PatientState.FINISHED
+    assert patient.state == PatientState.FINISHED
+    assert patient.completed_tests == {"A", "B", "C"}
+    assert patient.active_visit_id is None
+    assert patient.active_station_id is None
+    assert coordinator.pending_arrivals == coordinator.pending_travels == []
+    assert coordinator.next_event_time() is None
+    for station in stations.values():
+        assert station.waiting == [] and station.active == {}
+        assert station.resource.count == 0 and station.resource.queue == []
+        assert station.release_count == 1
