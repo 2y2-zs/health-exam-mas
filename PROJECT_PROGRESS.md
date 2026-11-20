@@ -17,6 +17,7 @@ Reviewed on 2026-11-20. [Design baseline on `main`](https://github.com/2y2-zs/he
 | Package migration at `18855bf` | 146 passed, 2 failed, matching `ea7e73d`. The coordinated suites had 140 passes, including 11 checks covering T01–T10. T04 has two cases and T08 uses the single-station harness. |
 | Arrival validation and event ordering at `5abfe6e` | 160 passed, 2 failed. The 14 new regression cases passed. A later comment cleanup reproduced the full-suite totals and all 38 events in the B-station run. |
 | Single mixed-arrivals check at `b70b485` | Passed. [Configuration, assisted calculation and original log](docs/MODEL0_MIXED_B_TRACE.md) |
+| Model 0 verification at `fd71ade` | 154 coordinated checks passed, including the 11 cases for T01–T10. The full suite reported 160 passed and 2 native-path failures. [Run record and original traces](docs/MODEL0_VERIFICATION_RECORD.md) |
 
 The two open failures are on the native SimPy path. The coordinated path served u1 before u2 under both registration orders and matched the T06 raw order. The package-only T01 smoke check logged departure at t=8. [Simultaneous-request assertion](tests/test_model0_same_time_probe.py#L57) · [T06 raw order assertion](tests/test_model0_t06.py#L311)
 
