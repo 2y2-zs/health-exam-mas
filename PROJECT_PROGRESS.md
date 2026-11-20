@@ -34,6 +34,8 @@ These are development diagnostics using synthetic inputs. The student's acceptan
 
 ### Phase ordering and input checks
 
+The mixed-B development check passed at `b70b485`. [Assisted derivation and raw trace](docs/MODEL0_MIXED_B_TRACE.md)
+
 - **Phase 3 ordering.** With rank-2 P1 at t=0, A-to-B travel ends at t=5. Rank-1 P2 enters at t=5 and travels immediately to B. The raw log records u2 then u1 for travel completion. Once both arrivals are ready, Phase 4 queues u1 then u2. The B service starts are u1 at t=5 and u2 at t=8. The [regression](tests/test_model0_coordinated_arrivals.py) checks these events in their original order.
 - **Pre-run input checks.** The coordinated entry rejects nonfinite or negative arrival times at registration. Before the first event bucket it checks every preregistered package for managed stations, a route containing each required station exactly once, and valid precedence edges in route order. An invalid future package leaves the clock, pending arrivals and log untouched. See the [configuration contract](docs/MODEL_SPEC.md#5-configuration-observation-and-logging-contracts).
 
