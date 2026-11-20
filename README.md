@@ -6,22 +6,14 @@
 
 ## Research scope
 
-- **50%**: Multi-agent simulation, verification and validation of daily health examination flows. Patient Agent states, heterogeneity, autonomous decisions, observable information and interactions are important modelling concerns; specific behavioural rules remain to be justified.
-- **40%**: Comparative evaluation of existing Queue Scheduling Policies from a centre-operations perspective in a common environment. FCFS is the confirmed baseline; other policies remain undecided.
-- **10% optional**: A focused improvement only if experiments reveal a reproducible limitation.
-
-The proposed architecture separates Patient and Examination Station/Resource Agents and a Routing/Flow Mechanism, with Python + SimPy providing the discrete-event simulation (DES) engine. Routing determines the next eligible examination station; queue scheduling determines who is served next at a station. The Station Agent retains queue/resource ownership and delegates service selection to a replaceable Queue Scheduling Policy. The policy interface is a design provision, not an implemented priority queue.
-
-Model 0 retains its deterministic three-station fixture, fixed routes, FCFS, full compliance (B0) and T01–T10 verification scenarios. A verified stochastic Model 1 can support initial queue-policy comparisons with common flow and B0; Model 2 extends Patient Agent behaviour and is not a prerequisite for every comparison. B1/B2 remain candidate behavioural hypotheses. Candidate outcomes include waiting time, equipment utilization, completions, clearance time and fairness; metric definitions and experimental design are not yet frozen.
-
-Later packages may use checked literature or authentic hospital public package information. Source-supported items, adaptations and synthetic assumptions must be distinguished; final packages, behaviour rules and experiment parameters remain undecided.
+This PSP305 project uses Python and SimPy to model daily health examination flows and compare station queue scheduling policies. FCFS is the baseline. [Research questions](docs/RESEARCH_CONTEXT.md#research-allocation-and-questions)
 
 ## Project documents
 
-- [Research background and literature](docs/RESEARCH_CONTEXT.md)
-- [Literature library: verified titles, DOIs, links and research notes](docs/LITERATURE_LIBRARY.md)
+- [Research context and official dates](docs/RESEARCH_CONTEXT.md)
+- [Literature and reading notes](docs/LITERATURE_LIBRARY.md)
 - [Simulation and Agent specification](docs/MODEL_SPEC.md)
-- [Model assumptions and evidence register](docs/MODEL_ASSUMPTIONS.md)
+- [Model rules and evidence register](docs/MODEL_ASSUMPTIONS.md#3-model-0-synthetic-software-verification-fixture)
 - [Model 0 verification plan](docs/VERIFICATION_PLAN.md)
 - [Project progress and evidence](PROJECT_PROGRESS.md)
 - [Interim Poster materials and Gantt chart](poster/README.md)
@@ -29,8 +21,8 @@ Later packages may use checked literature or authentic hospital public package i
 
 ## Development status
 
-`main` holds the design baseline. This development branch contains the native implementation and the [coordinated Model 0 path](src/health_exam_mas/model0_coordinator.py). The coordinated path can run the deterministic fixture from `src/`. Formal acceptance is pending. See [project progress](PROJECT_PROGRESS.md#recorded-development-checks) for the check results and remaining issues.
+The development branch contains the native and coordinated Model 0 paths. Independent acceptance is pending. [Development checks and open issues](PROJECT_PROGRESS.md#recorded-development-checks)
 
 ## Academic integrity
 
-Use AI for learning, architecture discussions, design critique and debugging support. Assessed source code, simulation experiments, analysis and conclusions must be completed independently by the student in accordance with PSP305 requirements.
+The student owns assessed implementation, experiments, analysis and conclusions. [PSP305 collaboration guidance](AGENTS.md)

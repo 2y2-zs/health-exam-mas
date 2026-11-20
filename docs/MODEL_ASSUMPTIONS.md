@@ -120,20 +120,20 @@ These are **candidate** inputs, not yet a validated day-to-day centre dataset.
 
 ## 5. Model 2: autonomous patient behaviour
 
-Patient state, heterogeneous requirements/attributes, observable information, decisions/actions and interactions belong to RQ1 from the initial model; Model 2 is an optional extension to richer behaviour, not the point at which patients first become agents. Simple explicit B0 behaviour is sufficient initially. After Model 0 verification, a verified Model 1 with common flow and B0 can support initial RQ2 queue-policy comparisons without waiting for Model 2. B1/B2 remain hypotheses to assess, not required or calibrated behaviours.
+Model 2 explores optional behaviour beyond B0. The observation and behavioural hypotheses below require their own evidence. [Research context](RESEARCH_CONTEXT.md#decision-scope-and-proposed-research-mechanism)
 
 | ID | Behaviour | Type | Evidence and limitation | Verification / validation |
 |---|---|---|---|---|
 | B0 | Always obey a legal recommendation | DESIGN baseline | Operational compliance simplifying assumption, not necessarily actual behaviour | Confirm chosen==recommended in all B0 traces |
 | B1 | Independent acceptance with patient-specific probability p; if reject, choose a different **eligible** next station | ASSUMPTION | Do not use Li 2025 as proof of any specific p or independence assumption | Explore sensitivity; no legal alternative => recommended station |
 | B2 | State-dependent choice using perceived queue/wait, travel and individual tolerance/preferences | L-MECHANISM + ASSUMPTION | Li 2025 motivates examining behaviour and queues, but the proposed perceived-cost equation and weights are **our candidate rule**, not a published fitted Li model | Define observable information, functional form and parameter provenance |
-| B3 (deferred) | Leave a queue after having joined it (true queue switching) | L-MECHANISM; deferred implementation | Closer to Li 2025, but may require cancellation/priority/order changes and operational permission | Research separately; not a Model 0/1 requirement |
+| B3 (deferred) | Leave a queue after having joined it (true queue switching) | L-MECHANISM; deferred implementation | Closer to Li 2025, but may require cancellation/priority/order changes and operational permission | Check when queue entry and exit occur, including whether the queue is physical or virtual. Research separately |
 
 Observation boundary: agents cannot access future realized random service times. Specify whether “queue length” includes active service and whether expected incoming travellers are observable. Routing agent and patient perceived information need not be identical.
 
 ## 6. Evaluation assumptions (RQ2)
 
-RQ2 concerns service order within station queues. Fixed route, shortest observed queue and shortest estimated wait were earlier routing candidates, not queue scheduling baselines; do not relabel them. Keep routing/flow common when isolating queue-policy effects.
+Keep routing and B0 common in the initial comparisons. [Research scope](RESEARCH_CONTEXT.md#decision-scope-and-proposed-research-mechanism)
 
 | ID | Decision | Evidence classification | Open issue |
 |---|---|---|---|
@@ -159,21 +159,12 @@ Other evidence gaps remain open. Obtain arrival times and package frequencies to
 
 ## 8. Reference register
 
-Citations below identify supporting literature for **the particular concepts noted above**; they do not imply those papers endorse the project's synthetic parameters.
-
-This is not a verified catalogue of Queue Scheduling Policies. Retain routing, batch-scheduling and behavioural studies for their actual claims; check the original decision object and rule before attributing any station-level service-order algorithm.
-
-- **Lv et al. (2026)**, *Optimization of Batch Centralized Health Examination Scheduling Considering Inter-Item Transition Time and Sex Differences*. https://doi.org/10.1002/hsr2.72912
-- **Munavalli et al. (2020)**, *An Intelligent Real-Time Scheduler for Out-Patient Clinics: A Multi-Agent System Model*. https://doi.org/10.1177/1460458220905380
-- **Ying & Kittipittayakorn (2018)**, *Combining discrete event and agent-based simulation for reducing draftees waiting time in physical examination centers*. https://ntut.elsevierpure.com/en/publications/combining-discrete-event-and-agent-based-simulation-for-reducing-/
-- **Li et al. (2025)**, *When Do People Switch Queues? An Empirical Study of Discretionary Queue Switching at a Physical Examination Center*. https://doi.org/10.1111/deci.12646
-- **Ho et al. (2021)**, *Overbooking for Physical Examination Considering Late Cancellation and Set-Resource Relationship*. https://doi.org/10.1186/s12913-021-07148-y
-- **Chiu & Yeh (2010)**, *Fuzzy-Based Dynamic Scheduling System for Health Examination*. https://doi.org/10.1109/ICMLC.2010.5580551
-- **Jain et al. (2022)**, *Improving Patient Satisfaction and Outpatient Diagnostic Center Efficiency Using Novel Online Real-Time Scheduling*. https://doi.org/10.1016/j.orhc.2022.100338
+The literature library records full references and their original research settings. Rule-level evidence and limits are linked in the tables above. [Literature library](LITERATURE_LIBRARY.md)
 
 ## 9. Model 0 v1.1 decisions and evidence status (2026-11-05)
 
-Use the original decision IDs below to find each rule in the [Model 0 register](#3-model-0-synthetic-software-verification-fixture). The [specification](MODEL_SPEC.md) defines the contract. The [verification plan](VERIFICATION_PLAN.md) supplies the inputs and expected traces.
+<details>
+<summary>Earlier decision IDs and their current rules</summary>
 
 | v1.1 ID | Decision | Current rule or record |
 |---|---|---|
@@ -189,24 +180,16 @@ Use the original decision IDs below to find each rule in the [Model 0 register](
 | V11-10 | Independent manual expectations for T01–T10 | M0-13 and [required student evidence](VERIFICATION_PLAN.md#3-evidence-required-for-each-student-run-test) |
 | V11-11 | Record SimPy version and resource/dispatch approach for formal acceptance | M0-08e and [implementation gate](#implementation-gate) |
 
-- **Munavalli et al. 2020:** multi-agent healthcare coordination is supported; our agent decomposition and active autonomous examinees are project choices, not direct observations from that work.
-- **Ying & Kittipittayakorn 2018:** examination-centre DES + agent-based modelling has precedent; that does not establish that the paper used our Python/SimPy architecture.
-- **Li et al. 2025:** examinee deviations/queue-switching requests motivate investigation, but exact physical/virtual queue-entry and queue-exit timing is **needs-primary-check**. Our **pre-queue override** and B1/B2 rules are distinct unvalidated candidates.
-- **Ho et al. 2021:** multiple examination sets support modelling heterogeneous required tests, but not the specific synthetic P1–P3 definitions.
-- **Lv et al. 2026:** original centralized-batch numeric case is not evidence for daily Poisson arrivals, Gamma service durations, candidate demand rates or assumed patient demographics. Table 12's six candidate rows have been checked for the batch case. The candidate Table 11 travel entries still need transcription checks.
+</details>
 
 ### Implementation gate
 
-The development record at `5abfe6e` reports 11 coordinated checks covering T01–T10, including both T04 cases and the single-station T08 harness. The full suite recorded 160 passes and two native-path failures (same-time patient order and the T06 raw log). It records SimPy 4.1.2. Gate 1 remains open pending student verification of the chosen entry point. Record the actual environment, commit, independent expectations and raw traces together. [Development checks](../PROJECT_PROGRESS.md#recorded-development-checks) · [Phase ordering and input checks](../PROJECT_PROGRESS.md#phase-ordering-and-input-checks)
-
-Two service-selection queues can disagree about who gets a server. M0-08e documents how the coordinated path avoids this risk and how the student can check capacity and release ownership.
+Gate 1 requires the actual environment, commit, independently derived expectations and ordered logs. [Current results and open issues](../PROJECT_PROGRESS.md#recorded-development-checks) · [Required student evidence](VERIFICATION_PLAN.md#3-evidence-required-for-each-student-run-test)
 
 ### Research direction update (2026-11-10)
 
-The working title and RQ2 now concern **Queue Scheduling Policies** (who is served next), separately from Routing (next station). FCFS alone is confirmed; other algorithms, metric definitions and experimental factors remain undecided. Patient Agent state, heterogeneity, observable information, behaviour and interactions remain central to RQ1, with no mandatory complex behaviour. Checked literature/hospital-public packages are allowed with provenance and explicit adaptations. Initial RQ2 may use verified Model 1 + common flow + B0; B1/B2 remain optional hypotheses. This research direction update retained the Model 0 numerical rules and T01–T10. See [project progress](../PROJECT_PROGRESS.md) for subsequent development evidence.
+[Agreed research questions](RESEARCH_CONTEXT.md#research-allocation-and-questions)
 
 ## 10. Update procedure
 
-For each changed setting, record: **ID -> prior value -> new value -> supporting evidence or experiment purpose -> impact on agents/routes/tests -> verification or validation status**. Keep this document aligned with `MODEL_SPEC.md` and `VERIFICATION_PLAN.md`.
-
-For a new rule, record the model and ID, the executable rule, its source or design purpose, the claim that evidence supports, a verification case or operational record, and the remaining question. Date any source check and link execution evidence to its commit.
+For each rule, record its ID, applicable model, prior and new values, rationale or source, impact on agents and tests, and verification or validation status. Date source checks and link recorded results to the tested commit. [Specification](MODEL_SPEC.md) · [Verification plan](VERIFICATION_PLAN.md)

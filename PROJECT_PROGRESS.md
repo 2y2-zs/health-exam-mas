@@ -1,49 +1,45 @@
 # Project progress
 
-Reviewed on 2026-11-20. The [design baseline](https://github.com/2y2-zs/health-exam-mas/tree/ee5753f195dc71aee7d468a5814d6457d967c699) is on `main`. The [Model 0 development checkpoint](https://github.com/2y2-zs/health-exam-mas/commit/ea7e73d32d8351f5e6c219d19680e4457182708b) contains the implementation, prototypes and tests summarized below.
+Reviewed on 2026-11-20. [Design baseline on `main`](https://github.com/2y2-zs/health-exam-mas/tree/ee5753f195dc71aee7d468a5814d6457d967c699) · [Initial development checkpoint](https://github.com/2y2-zs/health-exam-mas/commit/ea7e73d32d8351f5e6c219d19680e4457182708b)
 
 ## Completed
 
 | Work | Evidence |
 | --- | --- |
-| Agreed research direction and deterministic Model 0 specification | [Research context](docs/RESEARCH_CONTEXT.md), [Model 0 specification](docs/MODEL_SPEC.md) and [T01–T10 expected traces](docs/VERIFICATION_PLAN.md). RQ2 compares station queue scheduling policies with FCFS as the baseline. Routing remains a separate decision. |
-| Committed the initial Model 0 simulation and station coordination prototypes | [Patient and station implementation](https://github.com/2y2-zs/health-exam-mas/blob/ea7e73d32d8351f5e6c219d19680e4457182708b/src/health_exam_mas/model0.py), [single-station prototype](https://github.com/2y2-zs/health-exam-mas/blob/ea7e73d32d8351f5e6c219d19680e4457182708b/tests/model0_a_only_prototype.py), and [multi-station prototype](https://github.com/2y2-zs/health-exam-mas/blob/ea7e73d32d8351f5e6c219d19680e4457182708b/tests/model0_ab_coordinator.py). The [coordinated station](src/health_exam_mas/model0_station.py) and [multi-station coordinator](src/health_exam_mas/model0_coordinator.py) were subsequently moved into `src/` at `46388e3` and `18855bf`. The migration retained the simulation method bodies and the existing test assertions. |
-| Added executable cases covering the Model 0 fixture | [Coordinated test cases](https://github.com/2y2-zs/health-exam-mas/blob/ea7e73d32d8351f5e6c219d19680e4457182708b/tests/test_model0_ab_coordinator.py#L5664) and [T08 single-station handoff](https://github.com/2y2-zs/health-exam-mas/blob/ea7e73d32d8351f5e6c219d19680e4457182708b/tests/test_model0_a_only_coordinator.py#L2728). These files record the scenarios and assertions. |
+| Defined the research direction and deterministic Model 0 | [Research context](docs/RESEARCH_CONTEXT.md) · [Specification](docs/MODEL_SPEC.md) · [Rule and evidence register](docs/MODEL_ASSUMPTIONS.md) |
+| Built the native path and moved the coordinated Model 0 path into the package | [Native patient and station](src/health_exam_mas/model0.py) · [Coordinated station (46388e3)](src/health_exam_mas/model0_station.py) · [Coordinator (18855bf)](src/health_exam_mas/model0_coordinator.py) |
+| Added executable T01–T10 cases | [Expected traces](docs/VERIFICATION_PLAN.md#2-test-cases-t01t10) · [Coordinated tests at checkpoint](https://github.com/2y2-zs/health-exam-mas/blob/ea7e73d32d8351f5e6c219d19680e4457182708b/tests/test_model0_ab_coordinator.py#L5664) · [T08 single-station test at checkpoint](https://github.com/2y2-zs/health-exam-mas/blob/ea7e73d32d8351f5e6c219d19680e4457182708b/tests/test_model0_a_only_coordinator.py#L2728) |
 
 ### Recorded development checks
 
-The previous local development check reported 146 passes and two failures at `ea7e73d`. After moving the existing station and coordinator into the package, local development checks at `18855bf` reproduced **146 passed and 2 failed** using Python 3.12.10, SimPy 4.1.2 and pytest 9.2.0. The coordinated suites had **140 passes**, including **11 tests covering T01–T10**. T04 has two cases and T08 uses the single-station harness.
+| Check | Recorded result |
+| --- | --- |
+| Package migration at `18855bf` | 146 passed, 2 failed, matching `ea7e73d`. The coordinated suites had 140 passes, including 11 checks covering T01–T10. T04 has two cases and T08 uses the single-station harness. |
+| Arrival validation and event ordering at `5abfe6e` | 160 passed, 2 failed. The 14 new regression cases passed. A later comment cleanup reproduced the full-suite totals and all 38 events in the B-station run. |
+| Single mixed-arrivals check at `b70b485` | Passed. [Configuration, assisted calculation and original log](docs/MODEL0_MIXED_B_TRACE.md) |
 
-From the repository root in PowerShell, the full development check is:
+The two open failures are on the native SimPy path. The coordinated path served u1 before u2 under both registration orders and matched the T06 raw order. The package-only T01 smoke check logged departure at t=8. [Simultaneous-request assertion](tests/test_model0_same_time_probe.py#L57) · [T06 raw order assertion](tests/test_model0_t06.py#L311)
+
+The checks used Python 3.12.10, SimPy 4.1.2 and pytest 9.2.0. Run from the repository root in PowerShell.
 
 ```powershell
 .\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider -o pythonpath=src
 ```
 
-The two failures are in the native SimPy path: [patient ordering on simultaneous requests](tests/test_model0_same_time_probe.py#L57) and [T06 raw order at t=4](tests/test_model0_t06.py#L311). Both scenarios were also checked through the migrated coordinator with A/B/C configured. In the first, A served u1 then u2 under both registration orders. In T06, the original relevant t=4 event order was preserved and departures occurred at t=8, 12, 16 and 20. The package-only T01 smoke check used A/B/C and recorded departure at t=8.
-
-These are development diagnostics using synthetic inputs. The student's acceptance record should include the commit, environment, commands, independently derived expectations, raw traces and pass/fail results.
+**Gate 1 is open.** The student acceptance record should include the chosen entry point, commit, environment, run commands, independent expected traces, actual traces and results. [Evidence checklist](docs/VERIFICATION_PLAN.md#3-evidence-required-for-each-student-run-test)
 
 ## In progress
 
 | Work | Next evidence |
 | --- | --- |
-| Model 0 formal entry point and verification | For the deterministic fixture, create one environment and the A/B/C stations, register arrivals with `MultiStationCoordinator`, then run the coordinator and drain the environment. Record independent expected and actual traces for the coordinated path, including the mixed-source B case and the input checks below. |
-| Model 1 data source and scope decision | Confirm what operational data can be used with the supervisor. Record provenance for patient arrivals, packages, service durations, capacity and flow rules. If data access remains unresolved at the end of December, agree whether a literature-based scenario is suitable and document its assumptions and limits. See the [evidence register](docs/MODEL_ASSUMPTIONS.md#7-priority-evidence-gaps-and-mitigation). |
-| Interim Poster planning | [Course requirements and materials](poster/README.md) and [Gantt chart](poster/gantt.md). Use verified traces to demonstrate progress and explain the remaining same-time verification work. |
+| Model 0 formal entry point and verification | Build one environment with A/B/C, register arrivals with `MultiStationCoordinator`, run and drain. Record independent traces for the same-time and input checks below. |
+| Model 1 data source and scope | Confirm usable operational data with the supervisor. If access remains unresolved at the end of December, agree on the scope of a literature-based scenario. [Evidence priorities](docs/MODEL_ASSUMPTIONS.md#7-priority-evidence-gaps-and-mitigation) |
+| Interim Poster | Prepare reviewed evidence and the five-minute presentation. [Submission checklist](poster/README.md) · [Gantt chart](poster/gantt.md) |
 
 ### Phase ordering and input checks
 
-The mixed-B development check passed at `b70b485`. [Assisted derivation and raw trace](docs/MODEL0_MIXED_B_TRACE.md)
-
-- **Phase 3 ordering.** With rank-2 P1 at t=0, A-to-B travel ends at t=5. Rank-1 P2 enters at t=5 and travels immediately to B. The raw log records u2 then u1 for travel completion. Once both arrivals are ready, Phase 4 queues u1 then u2. The B service starts are u1 at t=5 and u2 at t=8. The [regression](tests/test_model0_coordinated_arrivals.py) checks these events in their original order.
-- **Pre-run input checks.** The coordinated entry rejects nonfinite or negative arrival times at registration. Before the first event bucket it checks every preregistered package for managed stations, a route containing each required station exactly once, and valid precedence edges in route order. An invalid future package leaves the clock, pending arrivals and log untouched. See the [configuration contract](docs/MODEL_SPEC.md#5-configuration-observation-and-logging-contracts).
-
-The 14 new development regression cases passed. The full development suite reported **160 passed and 2 failed**. The 11 coordinated T01–T10 checks passed and the two native failures described above remain open. Independent student acceptance is pending.
-
-### Candidate Model 1 sources
-
-Chen et al. (2021) report high-end screening package flows and examination duration inputs in Tables 2–4. Ho et al. (2021) give examination-set and resource mappings in Tables 2 and 13 and booking percentages in Table 11. These are separate centre-specific sources. Record the provenance of each adopted value and check what is observed, fitted or assumed. Daily walk-in arrival patterns and active parallel capacity still need local evidence or explicit scenario assumptions. [Chen et al.](https://link.springer.com/article/10.1186/s12913-021-06949-5) · [Ho et al.](https://link.springer.com/article/10.1186/s12913-021-07148-y)
+- **Mixed arrivals at B.** At t=5, travel completions are u2 then u1 and queue entries are u1 then u2. [Mixed-B trace](docs/MODEL0_MIXED_B_TRACE.md)
+- **Input validation.** The coordinated path rejects invalid arrival times and checks all registered packages before the first event bucket. A bad package for a later arrival stops the run before any admission. [Configuration contract](docs/MODEL_SPEC.md#5-configuration-observation-and-logging-contracts) · [Regression cases](tests/test_model0_coordinated_arrivals.py)
 
 ## Not started
 
@@ -55,6 +51,4 @@ Chen et al. (2021) report high-end screening package flows and examination durat
 
 ## Schedule priorities
 
-The [Gantt chart](poster/gantt.md) places initial RQ2 experiments in January and sets **2027-02-05** as the target to send a full Dissertation draft to the supervisor. Writing the research context, literature review and methods runs alongside implementation. S2 is reserved for feedback, follow-up verification and sensitivity analysis, the Oral Project Demonstration and final revisions. The [official submission dates](docs/RESEARCH_CONTEXT.md#schedule) are recorded separately.
-
-The main schedule risks are the same-time acceptance issues and access to operational data. Confirm data access early, use only approved de-identified records if available, and keep any literature-based findings scoped to the stated scenario.
+Access to operational data and student verification of same-time behaviour are the main schedule risks. Write the research context, literature review and methods alongside implementation. [Internal milestones](poster/gantt.md) · [Official deadlines](docs/RESEARCH_CONTEXT.md#schedule)

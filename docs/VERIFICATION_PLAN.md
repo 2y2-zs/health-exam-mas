@@ -1,12 +1,10 @@
 # Model 0 Verification Plan v1.1 — proposed hand-calculated test oracle
 
-**Status:** This document specifies the deterministic test cases and expected traces. All inputs below are artificial. The student should independently calculate and review expected results before using them as test oracles. See [project progress](../PROJECT_PROGRESS.md) for execution evidence and [MODEL_SPEC](MODEL_SPEC.md) and [MODEL_ASSUMPTIONS](MODEL_ASSUMPTIONS.md) for the design baseline.
-
-**Scope of this oracle:** the fixture, I1–I9 and T01–T10 below retain the deterministic **Model 0 FCFS baseline**. RQ2 now concerns which queued patient a station serves next; routing/flow still chooses the next station and remains a separate mechanism. T04's test-only alternative route continues to check independent eligibility, not an RQ2 routing comparison. Future non-FCFS policies need their own service-order expectations and verification evidence; the FCFS ordering clause of I6 and the exact baseline traces are not universal requirements for those policies. Capacity, legal service, unique ownership and other applicable safety requirements continue to hold.
+Use this plan to derive and check the Model 0 FCFS traces independently. Future policies need their own service-order expectations. Capacity, legal service and unique ownership still apply. [Recorded development results](../PROJECT_PROGRESS.md#recorded-development-checks)
 
 ## 1. Shared fixture and invariants
 
-Default model: A capacity 1 / service 4 min; B capacity 1 / service 3 min; C capacity 2 / service 5 min. Travel A↔B=1, B↔C=1, A↔C=2, entrance→first=0. Default routes: P1 A→B, P2 B→C, P3 A→B→C; P3 hard constraint only A-before-C. B0 accepts all legal recommendations; decisions take zero simulated time; single FCFS queue per station. Patient tie rank u1<u2<u3<u4; half-open service intervals [start,end). Same-time domain **proposed** order: service completions → resource release/progress commit → admissions → travel/routing/request-intent collection → queue commits → service starts. Exact SimPy enforcement is pending implementation decision. Each test creates a fresh empty environment unless specifically noted.
+Use the Model 0 fixture, service intervals and event order in the specification. Start each test with a fresh empty environment unless noted, with stable rank u1 < u2 < u3 < u4. [Fixture and event contract](MODEL_SPEC.md#2-model-0-deterministic-synthetic-fixture)
 
 | ID | Invariant |
 |---|---|
@@ -113,25 +111,19 @@ Use **separate fresh environments** for negative and positive subcases.
 
 ## 3. Evidence required for each student-run test
 
-Keep for each test: configuration, manual independent derivation, expected trace, actual event trace, assertions used, result (pass/fail only **after execution**), and explanation for discrepancies. Include negative tests in evidence without classifying expected exception as a simulation failure.
-
-Do not claim these cases have passed merely because time-lines have been specified.
+Record the configuration, independent calculation, expected and actual ordered traces, assertions and execution result. Explain discrepancies and record expected rejections as negative test outcomes.
 
 ## 4. SimPy-specific risks to verify
 
-- SimPy event scheduler ordering is not automatically the domain's six-phase ordering; test exact handling of simultaneous completions, arrivals, queue entries and starts.
-- SimPy Resource capacity requests can be granted immediately. The Station Agent must retain a single effective scheduling authority: a custom station queue and SimPy's own waiting/grant queue must not independently reorder the same requests, introduce hidden FCFS selection or grant service contrary to the selected queue policy. The formal implementation must demonstrate a single selection authority. A complex priority queue is outside this verification plan.
-- Distinguish station queue selection (which queued patient is served next) from routing/flow (which eligible station a patient visits next) and from SimPy event ordering. Changing one does not establish correctness of the others.
-- Distinguish process resume and domain state commits; ensure release occurs exactly once per visit and ownership is clear.
-- Choose a stable SimPy version and test contract. Decide whether native processes suffice or a minimal dispatcher is required; a custom global six-phase coordinator remains **optional**, not a mandatory Model 0 feature.
-- Verify inclusive cutoff by domain admission checks and drain-to-completion termination, not an abrupt `env.run(until=H)`.
+- Check raw order at simultaneous completions, arrivals, queue entries and service starts.
+- Confirm a single service-selection authority. SimPy Resource can grant a request immediately, so a station queue and a Resource queue can conflict.
+- Compare domain state and ownership across process resumes. Verify exactly one release per visit.
+- Record the SimPy version and the selected coordination approach. [Event contract](MODEL_SPEC.md#4-same-time-event-ordering-domain-semantics-and-open-implementation-decision)
+- Verify admission at cutoff H and drain-to-completion. T09 covers both.
 
 ## 5. Verification and evaluation gates
 
-- Gate 1: Model 0 deterministic implementation and independently evidenced verification.
-- Gate 2: Model 1 stochastic model (the existing six-station configuration remains a candidate), literature numbers rechecked against primary source, calibrated or labelled assumptions, repeated runs and verification of its extended behaviour with the FCFS baseline.
-- Initial RQ2 may follow verified Model 1 under common routing/flow rules and B0: compare subsequently specified existing queue scheduling policies using paired exogenous inputs, appropriate policy-specific checks and uncertainty estimates. FCFS is the only currently defined policy; other candidates remain pending review.
-- Model 2 is a possible later behavioural extension: assess whether B1/B2 are needed, then review and verify/validate any chosen responses and their observation boundaries before studying their interaction with queue policies. It is not a prerequisite for every RQ2 comparison.
-- Candidate RQ2 outcomes include waiting time, device/resource utilization, completion count or throughput, clearance time and fairness, with cycle time also available for consideration. Metric definitions and experimental scenarios remain open; agree them before experiments rather than treating this verification plan as a finalized evaluation design.
+- **Gate 1** requires independent verification through the formal Model 0 entry point. It remains open. [Project progress](../PROJECT_PROGRESS.md)
+- **Gate 2** requires a verified stochastic Model 1 FCFS baseline, checked primary inputs, calibrated or labelled assumptions, and repeated runs. [Model 1 inputs](MODEL_ASSUMPTIONS.md#4-model-1-candidate-examination-centre-configuration)
 
-**Gate status:** Prototype test results and outstanding issues are recorded in [project progress](../PROJECT_PROGRESS.md). Gate 1 remains open until the formal Model 0 entry point has independently recorded verification evidence.
+See the specification for later RQ2 verification and evaluation design. [RQ2 plan](MODEL_SPEC.md#7-rq2-queue-scheduling-policy-evaluation-deferred)

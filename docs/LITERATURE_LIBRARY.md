@@ -2,22 +2,11 @@
 
 > PSP305 FYP — *Multi-Agent Simulation and Comparative Evaluation of Queue Scheduling Policies for Daily Health Examination Centres*
 >
-> 更新：2026-11-10。本文献库是**论文证据与阅读索引**，不是已经完成的实验、已校准参数集，也不是已确定的 Queue Scheduling Policy 清单。关键内容应在正式引用时再次检查原文具体页码、表格与方法定义。
+> 更新：2026-11-20。本文献库是**论文证据与阅读索引**，不是已经完成的实验、已校准参数集，也不是已确定的 Queue Scheduling Policy 清单。关键内容应在正式引用时再次检查原文具体页码、表格与方法定义。
 
 ## 1. 研究范围与使用规则
 
-本项目研究的是**持续运行、患者陆续到达的日常体检中心**（daily health examination centre），不是普通综合医院门诊，也不是所有受检者同时到达的团体批量体检。邻近领域文献可以借鉴方法，但不可直接移植其流量、人数、服务时长或临床顺序。
-
-- **RQ1 — 多智能体仿真与验证（约 50%）**：患者（Patient Agent）、检查站/资源（Station/Resource Agent）、离散事件仿真（DES）、多种体检项目组合、随机输入、模型验证。
-- **RQ2 — 排队调度策略比较（约 40%）**：同一个检查站有患者等待时，决定**下一位由谁接受服务**（Queue Scheduling / Service Selection）。**FCFS** 是目前唯一明确的基线；其他规则须核对来源后选定。
-- **RQ3 — 可选改进（约 10%）**：只有在前两部分发现可复现问题后，才考虑局部改进；不预设新算法。
-
-**必须区分的决策：**
-1. **Routing / Flow（流程或下一站选择）**：一个受检者下一步去哪个符合要求的检查站。
-2. **Queue Scheduling（站点内排队调度）**：一个检查站空闲时，选择哪个已在其队列中等待的受检者先服务。
-3. **Appointment / Batch Scheduling（预约或批量预排程）**：患者何时预约或整批患者怎样事先排好计划。
-
-论文标题含有 *scheduling* 不代表它研究的是本项目的 RQ2。以下各论文均注明最接近哪种决策。
+本项目聚焦日常体检中心。使用文献时记录原始场景，并核对研究的决策对象。Routing 决定下一检查站，Queue Scheduling 决定本站下一位服务对象，Appointment / Batch Scheduling 决定预约或批量预排程。移用流量、资源数、时长和先后约束需要说明适用范围。[研究背景](RESEARCH_CONTEXT.md)
 
 ## 2. 一览表：已核对论文与 DOI
 
@@ -36,6 +25,8 @@
 | P09 | **Outpatient scheduling problem in smart hospital with two-agent deep reinforcement learning algorithm** — Zuo, Jin & Liu (2024) | [10.1007/s10791-024-09474-1](https://doi.org/10.1007/s10791-024-09474-1) · [期刊页](https://link.springer.com/article/10.1007/s10791-024-09474-1) | 双智能体选择医疗活动/服务台；**须区别于站点内服务次序** |
 | P10 | **When do people switch queues? An empirical study of discretionary queue switching at a physical examination center** — Li, Cui, Ji & Wei (2025) | [10.1111/deci.12646](https://doi.org/10.1111/deci.12646) · [期刊页](https://onlinelibrary.wiley.com/doi/abs/10.1111/deci.12646) | 体检中心实际排队切换行为；**行为动机，不直接给 B1/B2 参数** |
 | P11 | **Optimization of Batch Centralized Health Examination Scheduling Considering Inter-Item Transition Time and Sex Differences: An Empirical Optimization Study** — Lv et al. (2026) | [10.1002/hsr2.72912](https://doi.org/10.1002/hsr2.72912) · [开放全文](https://onlinelibrary.wiley.com/doi/10.1002/hsr2.72912) | **集中批量体检**；检查站、移动时间、性别差异与约束，不能照搬日常到达模式 |
+| P12 | **Combining discrete event and agent-based simulation for reducing draftees waiting time in physical examination centers** — Ying & Kittipittayakorn (2018) | [高校研究门户](https://ntut.elsevierpure.com/en/publications/combining-discrete-event-and-agent-based-simulation-for-reducing-/) | 征兵体检场景，体检流程 DES + ABS 的方法参考 |
+| P13 | **Data analysis of ambient intelligence in a healthcare simulation system: a pilot study in high-end health screening process improvement** — Chen et al. (2021) | [10.1186/s12913-021-06949-5](https://doi.org/10.1186/s12913-021-06949-5) · [全文](https://link.springer.com/article/10.1186/s12913-021-06949-5) | 高端体检案例。仿真假设第 2 条采用 FIFO，表 2–4 提供套餐流程和检查时长参考 |
 
 ## 3. 按研究问题整理（中文阅读笔记）
 
@@ -61,7 +52,11 @@
 - **对 RQ1 有何帮助**：支持建模套餐异质性、多个检查站资源需求，提示不能仅把体检视为一次独立看诊。
 - **对 RQ2 有何帮助**：提供预约层面运营权衡的背景，但不是站点内选择下一位患者的直接证据。
 - **注意**：研究中的取消概率、资源结构和套餐比例属于特定机构，未经核实不能用作本项目默认数据。
-- **下一步提取**：公开附录中的套餐与所需资源映射，并逐项记录原始项目、模型映射和简化。
+- **取证位置**：表 2 和附录表 13 列出套餐与资源映射，表 11 提供该中心的预约比例。采用项目时记录原始清单、模型映射和简化。
+
+**P13 — Chen et al. (2021)**
+
+- FIFO 是该高端体检仿真的候诊规则，可作为本站 FCFS 基准的先例。表 2–4 的流程和时长输入属于原研究中心。移用时核对哪些输入来自观测、拟合或仿真假设。[Model 0 的 FCFS 规则](MODEL_ASSUMPTIONS.md#station-queue-and-service)
 
 **P10 — Li et al. (2025)**
 
@@ -73,9 +68,9 @@
 **P11 — Lv et al. (2026)**
 
 - **研究什么**：集中批量体检的检查项目排序，考虑检查站间移动时间、性别相关差异及部分项目先后约束。
-- **对 RQ1 有何帮助**：候选检查项目、并行资源和站间移动数据；可作为后续 Model 1 配置的**待复核来源**。
+- **对 RQ1 有何帮助**：候选检查项目、并行资源和站间移动数据；可作为 Model 1 候选输入的案例来源。
 - **注意**：批量预先排程与日常陆续到达不同；其案例数字不是日常中心到达率、服务时间概率分布或套餐比例的证据；原文平均时间也不能自动推导 Gamma 分布。
-- **下一步提取**：原文 Table 11/12 的站点、容量、均值、方向性移动时间并核对单位与条件；所有使用数值注明原场景。
+- **核对状态**：表 12 中六个候选站点的房间或设备数与平均时长已核对。表 11 的候选站间移动时间仍需逐项核对。采用时注明原场景、单位和适用条件。
 
 ### B. DES + 多智能体环境与模型验证
 
@@ -123,14 +118,14 @@
 |---|---|---|---|
 | 检查套餐与资源映射 | P01, P06, P11 | 一名受检者可能需要多个检查项目，套餐与资源相关 | 本体检中心实际套餐比例、全部先后顺序 |
 | 多站、多阶段流程 | P03, P04, P11 | 多种流程与有限容量的建模机制 | 本项目已通过医院验证的真实路径 |
-| DES + Agent 架构 | P03, P05 | 流程、交互和动态状态的建模方法 | 本项目具体 Agent 拆分天然正确 |
+| DES + Agent 架构 | P03, P05, P12 | 流程、交互和动态状态的建模方法 | 本项目具体 Agent 拆分天然正确 |
 | 数据校准与验证 | P03, P08 | 输入来源、基线比较、模型验证思路 | 未提供真实数据时宣称已实证验证 |
 | 自主行为/改选请求 | P10 | 行为效应值得研究 | B1/B2 的概率、函数、触发规则已经被论文证实 |
-| 队列服务顺序（RQ2） | **FCFS 为项目设计基线**；P02/P07/P09 待核查 | 可进一步寻找策略线索 | 把 Routing、预约排程或批量计划当作 Queue Scheduling |
+| 队列服务顺序（RQ2） | P13 支持 FCFS 基准，P02/P07/P09 待核查 | FIFO 的体检仿真先例与待核实的策略线索 | 把 Routing、预约排程或批量计划当作 Queue Scheduling |
 
 ## 5. 下一轮阅读与待办
 
-1. **优先阅读 P06、P11 原文表格**：提取体检套餐/站点、有限资源、可能的项目次序；建立带页码、来源、原值、单位、适配说明的证据记录。对于 Model 1 候选数值，逐项核对后再引用。
+1. **继续核对 P06、P11 的候选输入**：记录表号、原值、单位和适配理由，补核 P11 表 11 的移动时间。
 2. **逐篇核对 P02、P07、P09 的决策对象**：只有明确控制“站点空闲时选择哪个已等待患者”的规则，才可能列入 RQ2 Queue Scheduling 候选库。
 3. **精读 P10 的方法与定义**：区分入队前另选检查站与入队后换队，不混用术语。
 4. **持续补录 Verification / Validation 文献**：应与 [MODEL_ASSUMPTIONS.md](MODEL_ASSUMPTIONS.md) 的证据类别和 [VERIFICATION_PLAN.md](VERIFICATION_PLAN.md) 的设计状态对应。

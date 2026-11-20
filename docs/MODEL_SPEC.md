@@ -1,6 +1,6 @@
 # Simulation Model Specification v1.1 — design, not implementation
 
-**Scope:** PSP305 FYP; ongoing daily health examination centre. Research allocation remains RQ1 50% agent-based simulation, RQ2 40% existing **Queue Scheduling Policy** evaluation from the centre's operational perspective, optional RQ3 10% improvement. See [RESEARCH_CONTEXT](RESEARCH_CONTEXT.md) and [MODEL_ASSUMPTIONS](MODEL_ASSUMPTIONS.md). **No source code or test results are implied by this specification.**
+Model contract for the PSP305 daily health examination centre simulation. [Research scope](RESEARCH_CONTEXT.md) · [Rule evidence](MODEL_ASSUMPTIONS.md)
 
 ## 1. Architecture and separation of responsibilities
 
@@ -9,7 +9,7 @@
 - **Routing / Flow Agent**: uses `recommend(patient, observable_state) -> station` to select **which eligible station a patient visits next**; recommendations are checked against the independent legal-eligibility function. In Model 0 the only routing policy is fixed route. Patient flow remains a separate mechanism held common across RQ2 queue-policy comparisons.
 - **SimPy event engine**: drives simulated time, arrival, travel completion, service and departure events. SimPy events/process states and domain Patient Agent states must not be conflated.
 
-RQ1 concerns patient state, heterogeneity, observable information, decisions and interactions with stations and the flow mechanism. Model 0 verifies a deliberately synthetic process, **not** empirically validated human autonomy. The Patient Agent is B0 compliant; whether B1/B2 add useful autonomous behaviour will be assessed later and does not block all RQ2 work.
+Model 0 uses the synthetic B0 compliance baseline. [Behaviour assumptions](MODEL_ASSUMPTIONS.md#5-model-2-autonomous-patient-behaviour)
 
 ### Queue policy boundary (design only)
 
@@ -72,7 +72,7 @@ Causal prerequisites precede dependent actions. In Phase 3, first finish positiv
 
 In Phase 4, collect all patients ready to join a station at t across all travel sources. Commit station queues in **A,B,C** order and simultaneous entries at each station by patient rank. Patients already waiting keep their place. Phase 5 then dispatches available capacity from the head of each queue.
 
-**Implementation status:** The development branch has a coordinated prototype. Acceptance through the formal Model 0 entry point is pending. See [project progress](../PROJECT_PROGRESS.md) for evidence. Do **not** assume native SimPy event processing intrinsically obeys these hospital/domain phases. SimPy schedules events by time, priority and insertion order; native Resource request/release callbacks may execute in different micro-orders. A full six-phase coordinator is **not mandatory at project outset**. The student should choose and document the smallest correct event coordination approach, then demonstrate with T06 and other same-time tests that the **observable domain outcome AND event trace** meet the selected semantics. If simple native processes cannot enforce the intended contract, either explicitly revise the domain rule and rederive the expected traces **before experiments**, or add suitable coordination. Merely sorting logged events afterwards does not count.
+**Implementation.** SimPy orders events by time, priority and insertion order. Native Resource callbacks can produce a different order from the table. Choose the smallest coordination mechanism that preserves both the outcome and original event order in T06 and other same-time checks. A global coordinator is optional. If the domain contract changes, document the change and rederive the expected traces before experiments. [Development status](../PROJECT_PROGRESS.md#recorded-development-checks)
 
 Intake closes at synthetic cutoff H with **inclusive admission at t=H**; no patient first arriving after H is admitted. Existing admitted patients may finish after H. Do not use `env.run(until=H)` as the whole simulation termination rule. Run until the intake is closed/all attempts considered and all admitted patients have FINISHED, with no waiting or active services. Detect stalled patients; a bare empty event queue alone is not sufficient evidence of success.
 
@@ -92,23 +92,16 @@ At domain **commit boundaries**, check capacity, uniqueness of active visit/reso
 
 ## 6. Model 1 and Model 2 (deferred)
 
-**Model 1:** six candidate stations from Lv et al. 2026 (ultrasound, ECG, blood draw, internal medicine, X-ray, ophthalmology); heterogeneous **hypothetical** P1/P2/P3 packages; continuous arrival candidates (e.g. Poisson), uncertain service durations (e.g. Gamma with assumed CV), travel-time matrix and resource capacity references. These remain candidate inputs. Verify original paper tables before transcription; batch-case inputs must not be advertised as day-to-day observed parameters. No unevidenced clinical precedence. Choose demand only after load screening `rho_j ≈ lambda Pr(package includes j) E[S_j] / capacity_j`. Start with common flow rules, B0 and the FCFS queue baseline. Once Model 1 has been verified and its input provenance reviewed, it can support comparisons of subsequently specified queue policies without requiring Model 2 first.
+Extend the verified baseline with stochastic inputs and common flow, B0 and FCFS for Model 1. Review provenance and screen offered load before selecting demand. [Candidate inputs and load check](MODEL_ASSUMPTIONS.md#4-model-1-candidate-examination-centre-configuration)
 
-The existing synthetic package lists are provisional examples. Packages may instead be drawn from checked primary literature or authentic hospital-published lists, recording source/URL, table/page or access date, original items, station mappings and adaptations. Package lists alone do not establish package proportions, clinical precedence, arrival patterns or service durations.
-
-**Model 2:** possible behavioural extensions to assess, not mandatory prerequisites for all queue-policy evaluation. B0 always accepts; candidate B1 accepts with hypothetical configurable probability or selects another eligible station; candidate B2 uses hypothetical observed/perceived state and tolerance. Behavioural inputs and rules require separate review and verification/validation. Pre-queue recommendation override is **not** equivalent to switching after already joining a queue, nor is either the station's selection of the next patient. Consult Li et al. 2025 full study before attributing exact switching timing or a response function to it. Mid-queue switching deferred.
+Model 2 can examine what patients do before joining a queue. B1/B2 require separate evidence. Queue switching after entry is deferred. RQ2 can begin with a verified Model 1 baseline. [Behaviour assumptions](MODEL_ASSUMPTIONS.md#5-model-2-autonomous-patient-behaviour)
 
 ## 7. RQ2 Queue Scheduling Policy evaluation (deferred)
 
-RQ2 asks which already-queued patient a station serves next when capacity becomes available, from the centre's operational perspective. FCFS is the only defined baseline; other existing queue scheduling policies are **pending selection**, primary-source review and precise specification. Fixed route, shortest observed queue and shortest estimated waiting time as next-station choices are routing/flow policies, not interchangeable names for station queue scheduling. Hold flow rules and B0 common for initial queue-policy comparisons; any later behavioural extension is a separately controlled question.
+FCFS is the confirmed baseline. For each candidate policy, verify its decision object and source fidelity. Record permitted observations, the selection rule and the tie rule. A policy may use a permitted service-time estimate. Future realized service durations are unavailable to it.
 
-For each later queue policy, define permitted observations, the selected waiting-patient rule and ties. Distinguish an observable service-time estimate from a future realized service duration; the latter must not be used to make decisions. Any reproduction must be checked for fidelity or explicitly described as literature-inspired. No new algorithm or priority-queue implementation is specified at this stage.
-
-Compare matched exogenous arrivals, packages and per-patient/station service demands; same global random seed alone does not guarantee matched random streams when policies change event order. Multiple independent replications and uncertainty intervals remain planned. Candidate outcomes include waiting time, cycle time, device/resource utilization, completion count or throughput, clearance time and fairness. Their precise definitions, units, population/groups, time windows, denominators and experimental scenarios remain open and must be agreed before experiments. No policy ranking or behavioural effect is presumed.
+Hold routing and B0 common in the initial comparison. Pair exogenous arrivals, packages and service demands across policies, accounting for differences in event order, and plan repeated runs with uncertainty estimates. Policy selection, metric definitions and scenario settings are open. [Evaluation assumptions](MODEL_ASSUMPTIONS.md#6-evaluation-assumptions-rq2)
 
 ## 8. Status
 
-Model 0 v1.1: **design baseline on `main`**. Implementation and tests are on the development branch. See [project progress](../PROJECT_PROGRESS.md) for the verification evidence and outstanding checks.
-Model 1 and Model 2: candidate design only, not calibrated or validated.
-RQ2: station queue-scheduling focus specified; FCFS baseline defined, other policies and experiment details pending. Model 2 is an optional behavioural extension, not a universal RQ2 prerequisite.
-Research experiments and empirical validation are pending.
+The Model 0 design baseline is on `main`. Development checks and formal acceptance status are tracked in the progress record. Model 1 and Model 2 remain candidates. Research experiments and empirical validation are pending. [Project progress](../PROJECT_PROGRESS.md)

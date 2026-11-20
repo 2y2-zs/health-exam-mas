@@ -1,6 +1,6 @@
 # Interim Poster
 
-The Interim Poster Presentation is due **2026-12-16 at 12:00** and counts for 20% of the module mark. See the [official schedule](../docs/RESEARCH_CONTEXT.md#schedule), [current project progress](../PROJECT_PROGRESS.md) and [Gantt chart](gantt.md).
+The poster and video are due **2026-12-16 at 12:00** and count for 20% of the module mark. [Official schedule](../docs/RESEARCH_CONTEXT.md#schedule) · [Gantt chart](gantt.md)
 
 ## Course materials
 
@@ -12,8 +12,8 @@ Use the 2026/27 Module Handbook (PDF pp. 4–5), the Week 9 S1 Assessment Introd
 - Show the research question, the rationale for the method, progress backed by evidence, limitations, relevant risks and next steps. Methodology, project planning and progress accounts for 40% of the poster assessment rubric.
 - Record the five-minute presentation personally, with your own voice and yourself visible throughout. Submit the MP4 (H.264 video, AAC audio) through the LMO MAM video submission link and verify that it plays after upload.
 - Use `Student Name-ID Number` for the submitted filenames. Complete Student Information and Parts A and C in Appendix B. Complete Part B for each AI tool and distinct use, including the version, date, purpose, contribution and how you reviewed it.
-- Before submission, trace any test result or other progress claim to evidence that you have reviewed and can explain.
+- Include only progress claims supported by evidence you have reviewed and can explain. [Project progress](../PROJECT_PROGRESS.md)
 
 ## Working files
 
-Keep student-written outlines and drafts in `drafts/` and reusable diagrams in `figures/` once those files are available. Edit the schedule in [gantt.md](gantt.md) and export a poster-sized version when the layout is ready. Keep course originals, separately submitted disclosures, personal identifiers and the recording in the local course folder.
+Use `drafts/` for outlines and `figures/` for reusable diagrams when available. Export the Gantt chart to fit the poster. Keep course originals, disclosures, personal identifiers and the recording in the local course folder.
