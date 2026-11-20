@@ -1,5 +1,3 @@
-"""T02: two simultaneous P1 patients compete for the capacity-one A station."""
-
 import simpy
 
 from health_exam_mas.model0 import (
@@ -14,7 +12,6 @@ from health_exam_mas.model0 import (
 
 
 def test_t02_two_p1_patients_compete_for_a():
-    # Each invocation creates an independent scenario. Start u1 before u2.
     env = simpy.Environment()
     stations = {
         station_id: StationAgent(env, station_id, config)
@@ -26,7 +23,7 @@ def test_t02_two_p1_patients_compete_for_a():
 
     env.process(patient_process(env, u1, stations, event_log))
     env.process(patient_process(env, u2, stations, event_log))
-    env.run()  # Let every scheduled process finish.
+    env.run()
 
     records = event_log.records
 
@@ -44,7 +41,6 @@ def test_t02_two_p1_patients_compete_for_a():
         assert len(found) == 1, (patient_id, event_type, station_id, found)
         return found[0]
 
-    # Fixed, manually derived service intervals: [start, end).
     expected_intervals = {
         ("u1", "A"): (0.0, 4.0),
         ("u1", "B"): (5.0, 8.0),
@@ -58,7 +54,6 @@ def test_t02_two_p1_patients_compete_for_a():
         assert start.visit_id == end.visit_id
         assert start.sequence_id < end.sequence_id
 
-    # Both enter the A queue at t=0; native Resource serves u1 first.
     a_entries = [r for r in records if r.event_type == "QUEUE_ENTRY" and r.station_id == "A"]
     assert [(r.patient_id, r.sim_time) for r in a_entries] == [
         ("u1", 0.0),
@@ -68,7 +63,6 @@ def test_t02_two_p1_patients_compete_for_a():
         "u2", "SERVICE_START", "A"
     ).sequence_id
 
-    # Queue waiting times are explicitly derived from the manual timeline.
     expected_queue_times_and_waits = {
         ("u1", "A"): (0.0, 0.0),
         ("u2", "A"): (0.0, 4.0),
@@ -82,7 +76,6 @@ def test_t02_two_p1_patients_compete_for_a():
         assert service_start.sim_time - entry.sim_time == wait_time
         assert entry.visit_id == service_start.visit_id
 
-    # Check actual service intervals for overlap, allowing end == next start.
     for station_id in ("A", "B"):
         actual_intervals = sorted(
             (
@@ -94,7 +87,6 @@ def test_t02_two_p1_patients_compete_for_a():
         assert all(start < end for start, end in actual_intervals)
         assert actual_intervals[0][1] <= actual_intervals[1][0]
 
-    # Exactly one departure per patient, at the hard-coded expected time.
     departures = [r for r in records if r.event_type == "DEPARTURE"]
     assert len(departures) == 2
     assert (only("u1", "DEPARTURE").sim_time, only("u2", "DEPARTURE").sim_time) == (
@@ -102,7 +94,6 @@ def test_t02_two_p1_patients_compete_for_a():
         12.0,
     )
 
-    # Final states and cleanup, including the unused C station.
     assert env.now == 12.0
     for patient in (u1, u2):
         assert patient.state == PatientState.FINISHED

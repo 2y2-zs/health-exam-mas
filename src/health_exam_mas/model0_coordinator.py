@@ -1,19 +1,3 @@
-
-"""Multi-station coordination for the deterministic Model 0 fixture.
-
-Supported:
-- A/B or A/B/C registration and environment validation
-- Phase 0/1: batch service completion and release
-- Phase 2: batch admission with an optional inclusive cutoff
-- Phase 3: validated zero-time entry routing and travel
-- Phase 4: atomic prevalidation and deterministic queue commitment
-- Phase 5: synchronous service dispatch
-- Phase 3 positive-duration travel registration, start and completion
-- Phase 3: departure after final service release
-- Arrival, service and travel-completion next-time queries
-- Run loop for preregistered arrivals with drain-to-completion
-"""
-
 from dataclasses import dataclass
 from math import isfinite
 
@@ -50,15 +34,13 @@ class ScheduledTravel:
 
 @dataclass(frozen=True)
 class ReadyQueueEntry:
-    """A committed TRAVEL_END awaiting its Phase 4 QUEUE_ENTRY."""
-
     patient: PatientAgent
     station_id: str
     travel_ended_at: float
 
 
 class MultiStationCoordinator:
-    """Manage registered stations using separately callable phases."""
+    """Commit the six domain phases at each simulation timestamp."""
 
     STATION_ORDER = ("A", "B", "C")
 
@@ -125,20 +107,14 @@ class MultiStationCoordinator:
 
         self.pending_travels: list[ScheduledTravel] = []
 
-        # Persistent ID history, including consumed arrival plans.
         self._registered_arrival_ids: set[str] = set()
 
-        # Actual Phase 2 admissions, with object identity preserved.
-        # Registration alone does NOT populate this dictionary.
         self._admitted_patients_by_id: dict[
             str, PatientAgent
         ] = {}
 
-        # A patient may complete ENTRY travel only once.
         self._entry_routed_ids: set[str] = set()
 
-        # Phase 3 produces these ready records after TRAVEL_END.
-        # Phase 4 consumes each one exactly once.
         self._ready_for_queue: dict[str, ReadyQueueEntry] = {}
 
         self._pending_final_releases: dict[str, float] = {}
@@ -148,8 +124,6 @@ class MultiStationCoordinator:
         self,
         arrival: ScheduledArrival,
     ) -> None:
-        """Register an arrival plan, without admitting the patient."""
-
         if not isfinite(arrival.at) or arrival.at < 0:
             raise ValueError("Arrival time must be finite and nonnegative")
         if arrival.at < self.env.now:
@@ -167,18 +141,7 @@ class MultiStationCoordinator:
         self._registered_arrival_ids.add(patient_id)
 
     def register_travel(self, travel: ScheduledTravel) -> None:
-        """Register a positive-duration move without executing it.
-
-        Only the exact object admitted by Phase 2 can schedule a move.
-        Travel must start now from the patient's current location,
-        have a managed/eligible destination, and end at precisely the
-        travel-matrix-defined time. No overlapping pending travel is
-        allowed for the same patient ID.
-
-        All validation precedes the single append. In particular this
-        method does not advance time, change any patient, write a log,
-        reserve a Resource or emit TRAVEL_START / TRAVEL_END.
-        """
+        """Reserve a travel plan in the calendar without starting the trip."""
         patient = travel.patient
         patient_id = patient.patient_id
 
@@ -241,23 +204,12 @@ class MultiStationCoordinator:
         ):
             raise ValueError("Patient already has a pending travel")
 
-        # No mutation occurs before this append.
         self.pending_travels.append(travel)
 
     def start_next_travel(
         self,
         patient: PatientAgent,
     ) -> ScheduledTravel:
-        """Phase 3: start the next positive-duration fixed-route move.
-
-        Called after Phase 1 releases an unfinished patient. Prevalidate
-        identity, state, visit ownership, fixed route, eligibility, and
-        directed travel duration. Register the plan before writing any
-        Phase 3 event, so registration failures leave patient/log intact.
-
-        Only TRAVEL_START occurs here; TRAVEL_END and Phase 4 queue entry
-        are deliberately deferred. No time advance or Resource request.
-        """
         patient_id = patient.patient_id
 
         if self._admitted_patients_by_id.get(patient_id) is not patient:
@@ -323,8 +275,6 @@ class MultiStationCoordinator:
             ends_at=self.env.now + duration,
         )
 
-        # The single plan-append is committed before any Phase 3 log
-        # or patient state change. It rejects an existing pending move.
         self.register_travel(travel)
 
         transition_patient_state(
@@ -360,15 +310,6 @@ class MultiStationCoordinator:
         return travel
 
     def commit_due_travels(self) -> list[PatientAgent]:
-        """Phase 3: finish all positive-duration travels due at env.now.
-
-        Reject an overdue plan, then prevalidate the *entire* due batch
-        before changing any location, ready record, log, or pending plan.
-        Return arriving patients in stable (rank, patient_id) order.
-
-        This is synchronous: no yield, clock advance, queue entry, or
-        Resource acquisition. Phase 4 remains a separate call.
-        """
         now = self.env.now
 
         if any(travel.ends_at < now for travel in self.pending_travels):
@@ -382,7 +323,7 @@ class MultiStationCoordinator:
             ),
         )
 
-        # First pass: reject any bad plan before committing the first move.
+        # Reject a bad travel plan before committing any arrival in the batch.
         seen_ids: set[str] = set()
         for travel in due:
             patient = travel.patient
@@ -451,8 +392,6 @@ class MultiStationCoordinator:
                     f"Conflicting ready queue record for {patient_id!r}"
                 )
 
-            # A registered plan is not necessarily a started move.
-            # Require the corresponding event emitted by start_next_travel().
             started = any(
                 record.event_type == "TRAVEL_START"
                 and record.phase == 3
@@ -468,7 +407,6 @@ class MultiStationCoordinator:
                     f"Travel for {patient_id!r} was registered but not started"
                 )
 
-        # Second pass: all business validation succeeded. Complete Phase 3.
         for travel in due:
             patient = travel.patient
             patient.location = travel.destination
@@ -487,15 +425,12 @@ class MultiStationCoordinator:
                 travel_ended_at=now,
             )
 
-        # Consume only due plans; preserve every future plan object.
         self.pending_travels = [
             travel for travel in self.pending_travels if travel.ends_at != now
         ]
         return [travel.patient for travel in due]
 
     def commit_due_arrivals(self) -> list[PatientAgent]:
-        """Phase 2: log due attempts and return the patients admitted now."""
-
         now = self.env.now
 
         if any(
@@ -516,7 +451,6 @@ class MultiStationCoordinator:
             ),
         )
 
-        # Validate the whole batch before recording any outcome.
         seen_ids: set[str] = set()
 
         for arrival in due:
@@ -572,14 +506,12 @@ class MultiStationCoordinator:
                 phase=2,
             )
 
-        # Keep future plans; retain ID registration history.
         self.pending_arrivals = [
             arrival
             for arrival in self.pending_arrivals
             if arrival.at != now
         ]
 
-        # Phase 3 only receives patients admitted in this batch.
         admitted = [arrival.patient for arrival in due] if intake_open else []
         for patient in admitted:
             self._admitted_patients_by_id[patient.patient_id] = patient
@@ -589,22 +521,6 @@ class MultiStationCoordinator:
         self,
         arrived_patients: list[PatientAgent],
     ) -> list[PatientAgent]:
-        """Phase 3: route admitted patients from ENTRY with zero travel.
-
-        Entire-batch validation precedes every state or log mutation.
-
-        Phase 3 writes, in rank/ID order:
-            NEEDS_ROUTING
-            DECIDING
-            ROUTE_DECISION
-            TRAVEL_START
-
-        It then completes the whole zero-time travel batch:
-            TRAVEL_END
-
-        No yield, time advancement, queue entry or Resource request.
-        """
-
         batch = sorted(
             arrived_patients,
             key=lambda patient: (
@@ -613,8 +529,6 @@ class MultiStationCoordinator:
             ),
         )
 
-        # First pass: validate EVERY patient and destination.
-        # No events, locations, patient states or resources are changed.
         planned_moves: list[tuple[PatientAgent, str]] = []
         seen_ids: set[str] = set()
 
@@ -668,8 +582,6 @@ class MultiStationCoordinator:
                     "the beginning of the fixed route"
                 )
 
-            # The existing helper also checks the package's
-            # fixed-route eligibility constraints.
             destination = recommend_fixed_route(
                 patient.package,
                 patient.completed_tests,
@@ -706,9 +618,6 @@ class MultiStationCoordinator:
 
             planned_moves.append((patient, destination))
 
-        # All validation has passed. Phase 3 is now synchronous.
-
-        # Second pass: routing and TRAVEL_START for every patient.
         for patient, destination in planned_moves:
             transition_patient_state(
                 patient=patient,
@@ -749,7 +658,6 @@ class MultiStationCoordinator:
                 phase=3,
             )
 
-        # Third pass: commit all zero-duration travel completions.
         for patient, destination in planned_moves:
             patient.location = destination
 
@@ -763,14 +671,11 @@ class MultiStationCoordinator:
                 phase=3,
             )
 
-        # Persist one-time entry-travel ownership after completion.
         self._entry_routed_ids.update(
             patient.patient_id
             for patient, _ in planned_moves
         )
 
-        # Record the completed move only after all Phase 3 events.
-        # Phase 4 will verify the original patient, station and time.
         for patient, destination in planned_moves:
             self._ready_for_queue[patient.patient_id] = ReadyQueueEntry(
                 patient=patient,
@@ -787,24 +692,12 @@ class MultiStationCoordinator:
         self,
         ready_patients: list[PatientAgent],
     ) -> list[PatientAgent]:
-        """Phase 4: batch-enqueue completed travels in station order.
-
-        Validate the ENTIRE batch without side effects before starting
-        any Station.enqueue call. Every patient must have a matching,
-        unconsumed TRAVEL_END ready record for the CURRENT time bucket.
-
-        Station.enqueue owns the WAITING state, visit ownership and
-        Phase 4 QUEUE_ENTRY log. This method never acquires Resource.
-        Phase 5 remains a separate explicit call.
-        """
-
         now = self.env.now
         station_order = {
             station_id: index
             for index, station_id in enumerate(self.station_ids)
         }
 
-        # First pass: no patient state, queue, log or ready-record mutations.
         seen_ids: set[str] = set()
         validated: list[ReadyQueueEntry] = []
 
@@ -884,7 +777,7 @@ class MultiStationCoordinator:
 
             validated.append(ready)
 
-        # Second pass: deterministic queue order. Do not sort EventLog.
+        # Merge entry trips and transfers before applying the station tie-break.
         validated.sort(
             key=lambda ready: (
                 station_order[ready.station_id],
@@ -905,11 +798,10 @@ class MultiStationCoordinator:
         return committed
 
     def complete_due_services(self) -> list[PatientAgent]:
-        """Phase 0/1: commit all due completions before any release."""
+        """Record every due completion before releasing any station."""
 
         due_by_station = {}
 
-        # Phase 0: SERVICE_END across all stations.
         for station_id in self.station_ids:
             station = self.stations[station_id]
 
@@ -917,7 +809,6 @@ class MultiStationCoordinator:
                 self.event_log
             )
 
-        # Phase 1: RESOURCE_RELEASE across all stations.
         released: list[PatientAgent] = []
 
         for station_id in self.station_ids:
@@ -940,7 +831,6 @@ class MultiStationCoordinator:
         return released
 
     def commit_departures(self, finished_patients: list[PatientAgent]) -> None:
-        """Phase 3: record each final release from this bucket exactly once."""
         now = self.env.now
         seen_ids: set[str] = set()
         travelling_ids = {travel.patient.patient_id for travel in self.pending_travels}
@@ -985,8 +875,6 @@ class MultiStationCoordinator:
             self._departed_patient_ids.add(patient.patient_id)
 
     def next_service_completion_time(self) -> float | None:
-        """Pure query: earliest active service completion."""
-
         earliest: float | None = None
 
         for station_id in self.station_ids:
@@ -1005,16 +893,6 @@ class MultiStationCoordinator:
         return earliest
 
     def next_event_time(self) -> float | None:
-        """Pure query: next arrival, service end or travel completion.
-
-        Scan all three event sources. Any overdue arrival, service or
-        travel is an error, even if another event has an earlier time.
-        A due-now event is valid and is returned without committing it.
-
-        No clock advance, patient changes, log records or plan removal.
-        Travel completions are not processed by the current Phase 0-2
-        event-bucket generator; that is a separate future change.
-        """
         now = self.env.now
         candidates: list[float] = []
 
@@ -1039,8 +917,6 @@ class MultiStationCoordinator:
         return min(candidates) if candidates else None
 
     def process_next_service_completion(self):
-        """Service-only generator, retained for component testing."""
-
         next_time = self.next_service_completion_time()
 
         if next_time is None:
@@ -1052,12 +928,7 @@ class MultiStationCoordinator:
         return self.complete_due_services()
 
     def process_next_event_bucket(self):
-        """Generator for one time bucket, Phase 0 through Phase 2 only.
-
-        Returns (released_patients, arrived_patients).
-
-        Phase 3 is NOT automatically invoked here.
-        """
+        """Advance through service completions, releases and admissions only."""
 
         next_time = self.next_event_time()
 
@@ -1067,22 +938,18 @@ class MultiStationCoordinator:
         if next_time > self.env.now:
             yield self.env.timeout(next_time - self.env.now)
 
-        # No yield between Phase 0/1 and Phase 2.
         released = self.complete_due_services()
         arrived = self.commit_due_arrivals()
 
         return (released, arrived)
 
     def dispatch_available_services(self) -> None:
-        """Phase 5: synchronously start services in station order."""
-
         for station_id in self.station_ids:
             self.stations[station_id].start_available(
                 self.event_log
             )
 
     def _assert_drained(self) -> None:
-        """Detect domain work left behind when the event calendar is empty."""
         remaining = self._admitted_patients_by_id.keys() - self._departed_patient_ids
         busy_stations = [
             station_id
@@ -1109,7 +976,6 @@ class MultiStationCoordinator:
             )
 
     def _validate_pending_packages(self) -> None:
-        """Check every registered package before the first event bucket."""
         for arrival in self.pending_arrivals:
             patient = arrival.patient
             package = patient.package
@@ -1142,7 +1008,6 @@ class MultiStationCoordinator:
                     )
 
     def run(self):
-        """Process complete time buckets for preregistered arrivals."""
         self._validate_pending_packages()
         if self._ready_for_queue or self._pending_final_releases:
             raise RuntimeError(
@@ -1150,20 +1015,18 @@ class MultiStationCoordinator:
             )
 
         while True:
-            # Yield only when advancing to the next timestamp.
             released, arrived = yield from self.process_next_event_bucket()
 
-            # A travel-only bucket has no releases or arrivals.
+            # Finish trips already underway before handling zero-time entry travel.
             ready = self.commit_due_travels()
             if not (released or arrived or ready):
-                # A rejection-only bucket can precede more scheduled work.
+                # A rejected arrival can leave later events pending.
                 next_time = self.next_event_time()
                 if next_time is not None and next_time > self.env.now:
                     continue
                 self._assert_drained()
                 return
 
-            # Finish Phase 3 before submitting queue entries or dispatching.
             ready.extend(self.route_entry_arrivals(arrived))
             finished: list[PatientAgent] = []
             continuing: list[PatientAgent] = []

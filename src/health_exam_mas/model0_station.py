@@ -1,5 +1,3 @@
-"""Station and visit records used by the coordinated Model 0 flow."""
-
 from dataclasses import dataclass
 
 import simpy
@@ -30,8 +28,6 @@ class ActiveVisit:
 
 
 class AOnlyCoordinatedStation:
-    """Own one domain waiting queue and one capacity-only Resource."""
-
     def __init__(
         self,
         env: simpy.Environment,
@@ -72,8 +68,6 @@ class AOnlyCoordinatedStation:
         patient: PatientAgent,
         event_log: EventLog,
     ) -> None:
-        """Phase 4: enqueue after travel completion."""
-
         if patient.location != self.station_id:
             raise ValueError(
                 f"Patient {patient.patient_id!r} must be at "
@@ -106,7 +100,7 @@ class AOnlyCoordinatedStation:
 
         visit_id = f"{patient.patient_id}:visit:1"
 
-        # Queue entry establishes visit ownership; travel reserves no capacity.
+        # Queue entry establishes the visit. Service start grants capacity.
         patient.active_visit_id = visit_id
         patient.active_station_id = self.station_id
 
@@ -137,8 +131,6 @@ class AOnlyCoordinatedStation:
         self,
         event_log: EventLog,
     ) -> list[ActiveVisit]:
-        """Phase 0: log due SERVICE_END without progress mutation."""
-
         due = sorted(
             (
                 visit
@@ -176,9 +168,7 @@ class AOnlyCoordinatedStation:
         due: list[ActiveVisit],
         event_log: EventLog,
     ) -> list[PatientAgent]:
-        """Phase 1: release visits and return all patients, including unfinished ones."""
-
-        # Validate the whole batch before changing any visit or resource.
+        # Reject stale releases before freeing any server in this batch.
         visit_ids: set[str] = set()
         for visit in due:
             if visit.visit_id in visit_ids:
@@ -231,8 +221,6 @@ class AOnlyCoordinatedStation:
         self,
         event_log: EventLog,
     ) -> None:
-        """Phase 5: FCFS by entry time, rank and patient ID."""
-
         while (
             self.waiting
             and self.resource.count < self.resource.capacity
@@ -249,7 +237,7 @@ class AOnlyCoordinatedStation:
             self.waiting.remove(next_visit)
             patient = next_visit.patient
 
-            # Request capacity only after domain queue selection.
+            # The station chooses the patient. SimPy grants the available slot.
             request = self.resource.request()
 
             if not request.triggered:

@@ -1,5 +1,3 @@
-"""Development regressions for coordinated arrivals and their queue order."""
-
 import pytest
 import simpy
 

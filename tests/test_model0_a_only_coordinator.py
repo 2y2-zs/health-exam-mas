@@ -1,6 +1,3 @@
-
-"""Verification of single-station coordination and rejection boundaries."""
-
 import simpy
 import pytest
 
@@ -60,7 +57,6 @@ EVENT_PHASES = {
 def prepare_b_travel(
     *, patient_id="u1", patient_rank=1, arrivals=(), run_id="B_TRAVEL"
 ):
-    """Prepare t=4 with B and a P1 patient who has completed A."""
     env = simpy.Environment()
     env.run(until=4.0)
     assert env.now == 4.0
@@ -75,7 +71,6 @@ def prepare_b_travel(
 
 
 def assert_empty_station(station):
-    """Check queue/resource cleanup without requiring patient completion."""
     assert station.waiting == []
     assert station.active == {}
     assert station.resource.count == 0
@@ -94,8 +89,6 @@ def patient_snapshot(patient):
 
 
 def run_scenario(arrivals, station_id="A"):
-    """Build one independent single-station simulation."""
-
     env = simpy.Environment()
 
     station = AOnlyCoordinatedStation(env, station_id=station_id)
@@ -135,8 +128,6 @@ def run_scenario(arrivals, station_id="A"):
 
 
 def only(records, patient_id, event_type):
-    """Return exactly one matching event."""
-
     matching = [
         record
         for record in records
@@ -150,8 +141,6 @@ def only(records, patient_id, event_type):
 
 
 def assert_phase_contract(records):
-    """Validate original append order without sorting."""
-
     for record in records:
         assert record.event_type in EVENT_PHASES, record
         assert record.phase == EVENT_PHASES[record.event_type], record
@@ -261,8 +250,6 @@ def assert_cleanup(
 
 
 def test_a_only_reverse_creation_order_still_uses_rank():
-    """Rank wins the same-time tie, independent of input order."""
-
     env, station, log, patients = run_scenario([
         ('u2', 2, 0.0),
         ('u1', 1, 0.0),
@@ -319,8 +306,6 @@ def test_a_only_reverse_creation_order_still_uses_rank():
 
 
 def test_a_only_completion_release_before_same_time_arrivals():
-    """Phase 0/1 must precede arrivals at t=4."""
-
     env, station, log, patients = run_scenario([
         ("u1", 1, 0.0),
         ("u2", 2, 1.0),
@@ -382,7 +367,6 @@ def test_a_only_completion_release_before_same_time_arrivals():
 
     assert u2_start.sim_time - u2_entry.sim_time == 3.0
 
-    # Strict original t=4 ordering.
     expected_t4 = [
         ("u1", "SERVICE_END", "A"),
         ("u1", "RESOURCE_RELEASE", "A"),
@@ -437,8 +421,6 @@ def test_a_only_completion_release_before_same_time_arrivals():
 
 
 def test_a_only_service_end_release_and_departure_commit_boundaries():
-    """Inspect Phase 0, Phase 1 and Phase 3 independently."""
-
     env = simpy.Environment()
     station = AOnlyCoordinatedStation(env)
     log = EventLog(run_id='A_ONLY_COMMIT_BOUNDARY')
@@ -449,7 +431,6 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
         package=A_ONLY,
     )
 
-    # Phase 3 travel was already completed.
     patient.location = "A"
     patient.state = PatientState.TRAVELLING
 
@@ -471,7 +452,6 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
     env.run(until=4.0)
     assert env.now == 4.0
 
-    # Phase 0: SERVICE_END
     due = station.close_services(log)
 
     assert len(due) == 1
@@ -498,7 +478,6 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
         if record.event_type == 'DEPARTURE'
     ]
 
-    # Phase 1: RESOURCE_RELEASE
     released = station.release_services(due, log)
 
     assert released == [patient]
@@ -525,7 +504,6 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
         if record.event_type == 'DEPARTURE'
     ]
 
-    # Phase 3: DEPARTURE
     coordinator = AOnlyCoordinator(
         env=env,
         station=station,
@@ -548,7 +526,6 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
     assert departure.phase == 3
     assert release.sequence_id < departure.sequence_id
 
-    # Departure must not release Resource again.
     assert station.release_count == 1
     assert station.resource.count == 0
 
@@ -558,8 +535,6 @@ def test_a_only_service_end_release_and_departure_commit_boundaries():
 def test_phase3_zero_travel_commits_before_phase4_queue_entry(
     monkeypatch,
 ):
-    """Observe state immediately before Phase 4."""
-
     observed = []
     original_enqueue = AOnlyCoordinatedStation.enqueue
 
@@ -651,8 +626,6 @@ def test_phase3_zero_travel_commits_before_phase4_queue_entry(
 
 
 def test_c_two_services_complete_together_before_any_release_or_next_start():
-    """Both C service END events precede all releases at t=5."""
-
     env, station, log, patients = run_scenario(
         [
             ("u1", 1, 0.0),
@@ -723,7 +696,6 @@ def test_c_two_services_complete_together_before_any_release_or_next_start():
         and record.patient_id == "u3"
     ]) == 1
 
-    # Strict raw t=5 log order, without sorting.
     expected_t5 = [
         (0, "u1", "SERVICE_END", "C"),
         (0, "u2", "SERVICE_END", "C"),
@@ -805,8 +777,6 @@ def test_c_two_services_complete_together_before_any_release_or_next_start():
 
 
 def test_register_positive_travel_is_a_plan_only():
-    """Register A -> B at t=4 without changing patient state."""
-
     env, station, log, coordinator, patient = prepare_b_travel(
         run_id='P1_REGISTER_TRAVEL'
     )
@@ -861,13 +831,6 @@ def test_register_positive_travel_is_a_plan_only():
 
 
 def test_commit_due_travels_at_boundary_without_queueing():
-    """Direct Phase 3 completion test for P1 A -> B travel.
-
-    No Coordinator.run() is started.
-    The patient remains TRAVELLING after TRAVEL_END
-    until a future Phase 4 QUEUE_ENTRY.
-    """
-
     env, station, log, coordinator, patient = prepare_b_travel(
         run_id='P1_TRAVEL_COMPLETION_BOUNDARY'
     )
@@ -875,7 +838,6 @@ def test_commit_due_travels_at_boundary_without_queueing():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    # t=4: Register A -> B travel [4, 5).
     travel = ScheduledTravel(
         patient=patient,
         origin="A",
@@ -915,7 +877,6 @@ def test_commit_due_travels_at_boundary_without_queueing():
         if record.event_type == 'TRAVEL_END'
     ]
 
-    # t=4.5: not due.
     env.run(until=4.5)
 
     assert env.now == 4.5
@@ -939,7 +900,6 @@ def test_commit_due_travels_at_boundary_without_queueing():
 
     assert_empty_station(station)
 
-    # t=5: exactly due.
     env.run(until=5.0)
 
     assert env.now == 5.0
@@ -989,7 +949,6 @@ def test_commit_due_travels_at_boundary_without_queueing():
     assert station.release_count == 0
     assert station.peak_resource_count == 0
 
-    # t=5: repeated call must not duplicate completion.
     completed_again = coordinator.commit_due_travels()
 
     assert completed_again == []
@@ -1025,11 +984,6 @@ def test_commit_due_travels_at_boundary_without_queueing():
 
 
 def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
-    """Complete the remaining P1 pathway using only Station B.
-
-    This is not the full coordinated T01.
-    """
-
     env, station, log, coordinator, patient = prepare_b_travel(
         run_id='P1_B_REMAINING_INTEGRATION'
     )
@@ -1037,7 +991,6 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    # t=4: Register A -> B travel [4, 5).
     travel = ScheduledTravel(
         patient=patient,
         origin="A",
@@ -1072,7 +1025,6 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
 
     env.process(coordinator.run())
 
-    # t=4.5: Travel in progress.
     env.run(until=4.5)
 
     assert env.now == 4.5
@@ -1094,12 +1046,10 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
         for record in log.records
     ] == ['TRAVEL_START']
 
-    # Drain t=5 and t=8.
     env.run()
 
     assert env.now == 8.0
 
-    # Complete raw append order, without sorting.
     actual_events = [
         (
             record.sim_time,
@@ -1148,7 +1098,6 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
     ):
         only(log.records, "u1", event_type)
 
-    # No second arrival or routing after travel completion.
     assert not [
         record
         for record in log.records
@@ -1239,16 +1188,6 @@ def test_run_consumes_pending_travel_and_finishes_remaining_p1_at_t8():
 
 
 def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
-    """Positive travel and entry travel finish at B at the same t=5.
-
-    u2: P1, already completed A; A -> B travel [4, 5), rank 2.
-    u1: B-only, entry arrival at t=5, rank 1.
-
-    Expected:
-        u1: B service [5, 8), departure at 8
-        u2: B service [8, 11), departure at 11
-    """
-
     u1 = PatientAgent(
         patient_id="u1",
         patient_rank=1,
@@ -1273,7 +1212,6 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
     assert u2.state == PatientState.DECIDING
     assert u2.completed_tests == {"A"}
 
-    # t=4: Register u2 A -> B travel [4, 5).
     travel = ScheduledTravel(
         patient=u2,
         origin="A",
@@ -1322,7 +1260,6 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
 
     env.process(coordinator.run())
 
-    # t=4.5: No B queue entry yet.
     env.run(until=4.5)
 
     assert env.now == 4.5
@@ -1339,14 +1276,12 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
 
     assert_empty_station(station)
 
-    # Drain t=5, t=8 and t=11.
     env.run()
 
     assert env.now == 11.0
 
     records = log.records
 
-    # 1. Both TRAVEL_END events before queue entry.
     travel_ends_t5 = [
         record
         for record in records
@@ -1384,7 +1319,6 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
         min(record.sequence_id for record in queue_entries_t5)
     )
 
-    # 2. Strict raw QUEUE_ENTRY order: u1, u2.
     actual_queue_order = [
         (
             record.patient_id,
@@ -1411,7 +1345,6 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
             and record.event_type == "QUEUE_ENTRY"
         ]) == 1
 
-    # 3. Strict t=5 relevant event order.
     relevant_types = {
         'ARRIVAL',
         'TRAVEL_END',
@@ -1456,7 +1389,6 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
         f"Raw t=5 log:\n{raw_t5_log}"
     )
 
-    # 4. Service intervals, waits and departures.
     expected_intervals = {
         'u1': (5.0, 8.0),
         'u2': (8.0, 11.0),
@@ -1519,7 +1451,6 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
         ("u2", 8.0),
     ]
 
-    # 5. u2 must not repeat ARRIVAL or Routing.
     u2_events = [
         record
         for record in records
@@ -1569,7 +1500,6 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
         < u1_travel_end.sequence_id
     )
 
-    # 6. Final states.
     assert u1.state == PatientState.FINISHED
     assert u1.location == "B"
     assert u1.completed_tests == {"B"}
@@ -1617,7 +1547,6 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
             actual_states,
         )
 
-    # 7. Cleanup.
     assert coordinator.pending == []
     assert coordinator.pending_travels == []
 
@@ -1629,7 +1558,6 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
     assert station.peak_resource_count == 1
     assert station.release_count == 2
 
-    # 8. Phase and sequence contracts.
     assert_phase_contract(records)
     assert [
         record.sequence_id
@@ -1638,15 +1566,8 @@ def test_same_time_mixed_travel_sources_queue_by_rank_at_b():
 
 
 def test_station_releases_unfinished_p1_after_a_without_departure():
-    """A Station must release a P1 patient who still needs B.
-
-    This test directly exercises Station Phase 0 and Phase 1.
-    No B Station is constructed and Coordinator.run() is not started.
-    """
-
     env = simpy.Environment()
 
-    # Construct only Station A.
     station = AOnlyCoordinatedStation(env, station_id='A')
     log = EventLog(run_id='P1_A_UNFINISHED_RELEASE')
 
@@ -1656,7 +1577,6 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
         package=P1_CONFIG,
     )
 
-    # Phase 3 ENTRY -> A travel has already completed.
     patient.location = "A"
     patient.state = PatientState.TRAVELLING
 
@@ -1664,7 +1584,6 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    # t=0: Phase 4 and Phase 5.
     station.enqueue(patient, log)
     station.start_available(log)
 
@@ -1681,11 +1600,9 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
     assert len(station.resource.users) == 1
     assert station.release_count == 0
 
-    # Advance to t=4.
     env.run(until=4.0)
     assert env.now == 4.0
 
-    # Phase 0: Record SERVICE_END only.
     due = station.close_services(log)
 
     assert len(due) == 1
@@ -1707,7 +1624,6 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
     assert station.resource.count == 1
     assert station.release_count == 0
 
-    # Phase 1: Release unfinished P1.
     released = station.release_services(due, log)
 
     assert len(released) == 1
@@ -1734,14 +1650,12 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
     assert release.visit_id == visit_id
     assert service_end.sequence_id < release.sequence_id
 
-    # No Departure is allowed for an unfinished package.
     assert not [
         record
         for record in log.records
         if record.event_type == 'DEPARTURE'
     ]
 
-    # No B admission or service has taken place.
     assert not [
         record
         for record in log.records
@@ -1764,7 +1678,6 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
     assert patient.location == "A"
     assert patient.completed_tests == {"A"}
 
-    # Coordinator boundary: explicit rejection.
     coordinator = AOnlyCoordinator(
         env=env,
         station=station,
@@ -1802,8 +1715,6 @@ def test_station_releases_unfinished_p1_after_a_without_departure():
 
 @pytest.mark.parametrize("arrival_time", [5.0, 6.0])
 def test_travel_rejects_a_different_patient_with_an_arrival_id(arrival_time):
-    """A pending arrival owns its ID even when its time differs from travel end."""
-
     entry_patient = PatientAgent("u1", 1, B_ONLY)
     arrival = ScheduledArrival(
         at=arrival_time,
@@ -1847,8 +1758,6 @@ def test_travel_rejects_a_different_patient_with_an_arrival_id(arrival_time):
 
 @pytest.mark.parametrize("stage", ["after_travel", "after_service"])
 def test_patient_id_remains_owned_after_travel_or_service(stage):
-    """Consuming a travel plan or completing service must not free its patient ID."""
-
     env, station, log, coordinator, patient = prepare_b_travel(
         run_id='PERSISTENT_PATIENT_ID'
     )
@@ -1880,7 +1789,6 @@ def test_patient_id_remains_owned_after_travel_or_service(stage):
     assert coordinator.pending_travels == []
 
     if stage == "after_service":
-        # B service is [5, 8).
         station.enqueue(patient, log)
         station.start_available(log)
 
@@ -1947,8 +1855,6 @@ def test_patient_id_remains_owned_after_travel_or_service(stage):
 
 @pytest.mark.parametrize("invalid_batch", ["foreign_visit", "duplicate_visit"])
 def test_invalid_release_batch_preserves_all_active_visits(invalid_batch):
-    """Reject a bad batch before releasing its valid first visit."""
-
     env = simpy.Environment()
     station = AOnlyCoordinatedStation(
         env,
@@ -2025,7 +1931,6 @@ def test_invalid_release_batch_preserves_all_active_visits(invalid_batch):
 
     assert log.records == before_log
 
-    # The original batch remains usable: both C services were [0, 5).
     released = station.release_services(due, log)
 
     assert len(released) == 2
@@ -2053,12 +1958,6 @@ def test_invalid_release_batch_preserves_all_active_visits(invalid_batch):
 
 
 def test_start_next_travel_after_a_release_stops_at_t4():
-    """Release P1 at A, then register and start A -> B at t=4 only.
-
-    No Coordinator.run() process is started. The test stops before
-    travel completion or B admission.
-    """
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(
@@ -2083,14 +1982,12 @@ def test_start_next_travel_after_a_release_stops_at_t4():
     patient.location = "A"
     patient.state = PatientState.TRAVELLING
 
-    # A service [0, 4).
     station_a.enqueue(patient, log)
     station_a.start_available(log)
 
     env.run(until=4.0)
     assert env.now == 4.0
 
-    # Phase 0 and Phase 1 at A.
     due = station_a.close_services(log)
     released = station_a.release_services(due, log)
 
@@ -2103,7 +2000,6 @@ def test_start_next_travel_after_a_release_stops_at_t4():
     assert_empty_station(station_a)
     assert station_a.release_count == 1
 
-    # Coordinator manages B only.
     coordinator_b = AOnlyCoordinator(
         env,
         station_b,
@@ -2112,7 +2008,6 @@ def test_start_next_travel_after_a_release_stops_at_t4():
     )
     assert coordinator_b.pending_travels == []
 
-    # Failed precondition: no plan, state or log mutation.
     patient.active_visit_id = "invalid-active-visit"
 
     snapshot = patient_snapshot(patient)
@@ -2125,10 +2020,8 @@ def test_start_next_travel_after_a_release_stops_at_t4():
     assert log.records == before_log
     assert coordinator_b.pending_travels == []
 
-    # Restore the deliberately injected invalid value.
     patient.active_visit_id = None
 
-    # Successful Phase 3 movement start at t=4.
     travel = coordinator_b.start_next_travel(patient)
 
     assert isinstance(travel, ScheduledTravel)
@@ -2139,7 +2032,6 @@ def test_start_next_travel_after_a_release_stops_at_t4():
     assert (travel.origin, travel.destination) == ("A", "B")
     assert (travel.started_at, travel.ends_at) == (4.0, 5.0)
 
-    # Starting travel does not advance time or change location.
     assert env.now == 4.0
     assert patient.state == PatientState.TRAVELLING
     assert patient.location == "A"
@@ -2147,12 +2039,10 @@ def test_start_next_travel_after_a_release_stops_at_t4():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    # B has no queue entry or resource reservation.
     assert_empty_station(station_b)
     assert station_b.release_count == 0
     assert station_b.peak_resource_count == 0
 
-    # Check exact original append order at t=4 without sorting.
     actual_t4 = [
         (
             record.phase,
@@ -2210,14 +2100,12 @@ def test_start_next_travel_after_a_release_stops_at_t4():
         < start.sequence_id
     )
 
-    # Neither Departure nor TRAVEL_END has happened.
     assert not [
         record
         for record in log.records
         if record.event_type in ("DEPARTURE", "TRAVEL_END")
     ]
 
-    # B admission and service must not begin at t=4.
     assert not [
         record
         for record in log.records
@@ -2230,7 +2118,6 @@ def test_start_next_travel_after_a_release_stops_at_t4():
         )
     ]
 
-    # Duplicate start: explicitly rejected without side effects.
     snapshot = patient_snapshot(patient)
     before_log = list(log.records)
     before_pending = list(coordinator_b.pending_travels)
@@ -2264,7 +2151,6 @@ def test_start_next_travel_after_a_release_stops_at_t4():
     assert_empty_station(station_a)
     assert_empty_station(station_b)
 
-    # The test intentionally stops at the t=4 boundary.
     assert env.now == 4.0
     assert_phase_contract(log.records)
 
@@ -2274,18 +2160,6 @@ def test_start_next_travel_after_a_release_stops_at_t4():
     ] == list(range(1, len(log.records) + 1))
 
 def test_p1_a_release_to_b_run_component_linkage():
-    """Connect A release to B Coordinator and drain the remaining P1 flow.
-
-    This is a component-linkage test, not a unified multi-station run.
-    A's Phase 0/1 are committed directly; B's Coordinator.run() handles
-    the registered A -> B travel and B service.
-
-    Expected:
-        t=4: A release, then DECIDING / ROUTE_DECISION / TRAVEL_START
-        t=5: TRAVEL_END, B QUEUE_ENTRY, B SERVICE_START
-        t=8: B SERVICE_END, RESOURCE_RELEASE, DEPARTURE
-    """
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(
@@ -2297,7 +2171,6 @@ def test_p1_a_release_to_b_run_component_linkage():
         station_id="B",
     )
 
-    # Both stations share the same EventLog.
     log = EventLog(
         run_id="P1_A_TO_B_COMPONENT_LINK"
     )
@@ -2308,8 +2181,6 @@ def test_p1_a_release_to_b_run_component_linkage():
         package=P1_CONFIG,
     )
 
-    # The initial ENTRY -> A travel is treated as already completed.
-    # The test begins with the patient at A, ready for Phase 4.
     patient.location = "A"
     patient.state = PatientState.TRAVELLING
 
@@ -2317,9 +2188,6 @@ def test_p1_a_release_to_b_run_component_linkage():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    # --------------------------------------------------
-    # t=0: Queue entry and service start at A
-    # --------------------------------------------------
     station_a.enqueue(patient, log)
     station_a.start_available(log)
 
@@ -2335,9 +2203,6 @@ def test_p1_a_release_to_b_run_component_linkage():
     assert station_b.active == {}
     assert station_b.resource.count == 0
 
-    # --------------------------------------------------
-    # t=4: Phase 0 and Phase 1 at A
-    # --------------------------------------------------
     env.run(until=4.0)
 
     assert env.now == 4.0
@@ -2352,7 +2217,6 @@ def test_p1_a_release_to_b_run_component_linkage():
     assert len(released) == 1
     assert released[0] is patient
 
-    # A is complete; B is still required.
     assert patient.state == PatientState.NEEDS_ROUTING
     assert patient.location == "A"
     assert patient.completed_tests == {"A"}
@@ -2378,9 +2242,6 @@ def test_p1_a_release_to_b_run_component_linkage():
     assert release_a[0].prior_state == PatientState.IN_SERVICE
     assert release_a[0].new_state == PatientState.NEEDS_ROUTING
 
-    # --------------------------------------------------
-    # t=4: Start the next travel through B Coordinator
-    # --------------------------------------------------
     coordinator_b = AOnlyCoordinator(
         env=env,
         station=station_b,
@@ -2404,7 +2265,6 @@ def test_p1_a_release_to_b_run_component_linkage():
     assert coordinator_b.pending_travels == [travel]
     assert coordinator_b.pending_travels[0] is travel
 
-    # Movement is started, not completed.
     assert env.now == 4.0
     assert patient.state == PatientState.TRAVELLING
     assert patient.location == "A"
@@ -2413,12 +2273,10 @@ def test_p1_a_release_to_b_run_component_linkage():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    # B has not received the patient yet.
     assert_empty_station(station_b)
     assert station_b.release_count == 0
     assert station_b.peak_resource_count == 0
 
-    # A resource release precedes every continuation event.
     actual_t4 = [
         (
             record.phase,
@@ -2443,12 +2301,8 @@ def test_p1_a_release_to_b_run_component_linkage():
         f"Actual t=4: {actual_t4!r}"
     )
 
-    # --------------------------------------------------
-    # Start B's Coordinator only after travel registration
-    # --------------------------------------------------
     env.process(coordinator_b.run())
 
-    # During [4, 5), the patient remains at A.
     env.run(until=4.5)
 
     assert env.now == 4.5
@@ -2459,11 +2313,7 @@ def test_p1_a_release_to_b_run_component_linkage():
     assert coordinator_b.pending_travels == [travel]
     assert_empty_station(station_b)
 
-    # --------------------------------------------------
-    # t=5: Travel completion and B service start
-    # --------------------------------------------------
-    # Run slightly past the bucket so that all events at t=5
-    # have been committed. B service is still active.
+    # Step past t=5 to include all events at that timestamp.
     env.run(until=5.5)
 
     assert env.now == 5.5
@@ -2512,15 +2362,10 @@ def test_p1_a_release_to_b_run_component_linkage():
         if record.event_type == "DEPARTURE"
     ]
 
-    # --------------------------------------------------
-    # t=8: Drain B service, release and departure
-    # --------------------------------------------------
     env.run()
 
     assert env.now == 8.0
 
-    # Compare the ENTIRE original append order.
-    # No sorting or event filtering is used here.
     actual_raw = [
         (
             record.sim_time,
@@ -2567,9 +2412,6 @@ def test_p1_a_release_to_b_run_component_linkage():
         f"Raw append log:\n{raw_log}"
     )
 
-    # --------------------------------------------------
-    # Service intervals and visit ownership
-    # --------------------------------------------------
     service_starts = [
         record
         for record in log.records
@@ -2612,11 +2454,8 @@ def test_p1_a_release_to_b_run_component_linkage():
         ("B", 5.0),
     ]
 
-    # Every station admission occurs exactly once.
     assert len(queue_entries) == 2
 
-    # Each station's entry, start, end and release share
-    # the station's visit ID.
     for station_id in ("A", "B"):
         records_for_station = [
             record
@@ -2645,7 +2484,6 @@ def test_p1_a_release_to_b_run_component_linkage():
             for record in records_for_station
         }) == 1
 
-    # No repeated arrival or movement start in the B continuation.
     assert not [
         record
         for record in log.records
@@ -2664,7 +2502,6 @@ def test_p1_a_release_to_b_run_component_linkage():
         if record.event_type == "TRAVEL_END"
     ]) == 1
 
-    # Departure occurs once, after B releases the patient.
     departures = [
         record
         for record in log.records
@@ -2691,9 +2528,6 @@ def test_p1_a_release_to_b_run_component_linkage():
         < departures[0].sequence_id
     )
 
-    # --------------------------------------------------
-    # Final patient and resource cleanup
-    # --------------------------------------------------
     assert patient.state == PatientState.FINISHED
     assert patient.location == "B"
     assert patient.completed_tests == {"A", "B"}
@@ -2713,7 +2547,6 @@ def test_p1_a_release_to_b_run_component_linkage():
     assert station_a.peak_resource_count == 1
     assert station_b.peak_resource_count == 1
 
-    # Global raw log phase and sequence contracts.
     assert_phase_contract(log.records)
 
     assert [
@@ -2721,12 +2554,7 @@ def test_p1_a_release_to_b_run_component_linkage():
         for record in log.records
     ] == list(range(1, len(log.records) + 1))
 
-    # Do not call assert_cleanup(): that helper is intended
-    # for single-station, single-package runs.
-
-
 def test_t08_reuses_released_capacity_and_rejects_stale_visit():
-    """An old release cannot affect the patient who took the service slot."""
     env = simpy.Environment()
     station = AOnlyCoordinatedStation(env, station_id="A")
     log = EventLog(run_id="A_ONLY_T08")

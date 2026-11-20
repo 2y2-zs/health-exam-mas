@@ -1,5 +1,3 @@
-"""T03: three simultaneous C-only patients share a capacity-two station."""
-
 import simpy
 
 from health_exam_mas.model0 import (
@@ -14,7 +12,7 @@ from health_exam_mas.model0 import (
 
 
 def test_t03_three_patients_compete_for_capacity_two_c():
-    # A test-only package; do not change P1_CONFIG or any production package.
+    # Direct C requests keep the upstream B queue out of this capacity test.
     c_only = PackageConfig(
         required_tests=frozenset({"C"}),
         fixed_route=("C",),
@@ -32,10 +30,9 @@ def test_t03_three_patients_compete_for_capacity_two_c():
         for i in (1, 2, 3)
     ]
 
-    # All three enter at t=0; creation order is u1, then u2, then u3.
     for patient in patients:
         env.process(patient_process(env, patient, stations, event_log))
-    env.run()  # Run until the event queue is empty.
+    env.run()
 
     records = event_log.records
 
@@ -51,13 +48,11 @@ def test_t03_three_patients_compete_for_capacity_two_c():
         assert len(found) == 1, (patient_id, event_type, found)
         return found[0]
 
-    # Fixed, manually specified expectations; no values are inferred from output.
     expected = {
         "u1": (0.0, 0.0, 5.0, 0.0, 5.0),
         "u2": (0.0, 0.0, 5.0, 0.0, 5.0),
         "u3": (0.0, 5.0, 10.0, 5.0, 10.0),
     }
-    # Tuple fields: (queue entry, service start, service end, wait, departure).
     for patient_id, (queue_time, start_time, end_time, wait, departure_time) in expected.items():
         entry = only(patient_id, "QUEUE_ENTRY")
         start = only(patient_id, "SERVICE_START")
@@ -72,7 +67,6 @@ def test_t03_three_patients_compete_for_capacity_two_c():
         assert entry.visit_id == start.visit_id == end.visit_id
         assert entry.sequence_id < start.sequence_id < end.sequence_id < departure.sequence_id
 
-        # Exactly one C recommendation and choice; never route to A or B.
         route = only(patient_id, "ROUTE_DECISION")
         assert (route.recommended_station, route.chosen_station) == ("C", "C")
 
@@ -96,9 +90,7 @@ def test_t03_three_patients_compete_for_capacity_two_c():
         if record.event_type in station_events
     )
 
-    # Reconstruct C occupancy using half-open intervals [start, end).
-    # At equal timestamps, process SERVICE_END (-1) before SERVICE_START (+1),
-    # independent of the event log's order at that same time.
+    # For half-open service intervals, subtract completions before adding starts.
     occupancy_changes = sorted(
         (
             record.sim_time,

@@ -1,5 +1,3 @@
-"""T04: hard precedence is independent of the fixed-route policy."""
-
 import pytest
 import simpy
 
@@ -17,7 +15,6 @@ from health_exam_mas.model0 import (
 
 
 def test_t04_rejects_fixed_route_that_violates_hard_precedence():
-    # Deliberately invalid test-only route: C cannot precede A.
     package = PackageConfig(
         required_tests=frozenset({"A", "B", "C"}),
         fixed_route=("C", "A", "B"),
@@ -38,7 +35,6 @@ def test_t04_rejects_fixed_route_that_violates_hard_precedence():
     with pytest.raises(ValueError, match=r"Fixed route recommends station 'C'.*not eligible"):
         env.run()
 
-    # Rejection must happen before any travel, queue entry, or service.
     assert env.now == 0.0
     assert not any(
         record.event_type in {"TRAVEL_START", "QUEUE_ENTRY", "SERVICE_START"}
@@ -56,14 +52,12 @@ def test_t04_rejects_fixed_route_that_violates_hard_precedence():
 
 
 def test_t04_allows_alternative_fixed_route_a_c_b():
-    # The constraint is A before C, not a mandatory A -> B -> C route.
     package = PackageConfig(
         required_tests=frozenset({"A", "B", "C"}),
         fixed_route=("A", "C", "B"),
         hard_precedence=frozenset({("A", "C")}),
     )
 
-    # Eligibility is independent of the policy route.
     assert eligible_stations(package, set()) == frozenset({"A", "B"})
     assert "B" in eligible_stations(package, set())
     assert eligible_stations(package, {"A"}) == frozenset({"B", "C"})
@@ -83,7 +77,6 @@ def test_t04_allows_alternative_fixed_route_a_c_b():
     def events(event_type: str):
         return [record for record in records if record.event_type == event_type]
 
-    # Manual fixed timeline (start inclusive, end exclusive), not inferred.
     assert [(r.station_id, r.sim_time) for r in events("QUEUE_ENTRY")] == [
         ("A", 0.0),
         ("C", 6.0),
@@ -100,7 +93,6 @@ def test_t04_allows_alternative_fixed_route_a_c_b():
         ("B", 15.0),
     ]
 
-    # ENTRY -> A is zero-duration; A -> C takes 2, C -> B takes 1.
     assert [(r.station_id, r.sim_time) for r in events("TRAVEL_START")] == [
         ("A", 0.0),
         ("C", 4.0),
@@ -112,7 +104,6 @@ def test_t04_allows_alternative_fixed_route_a_c_b():
         ("B", 12.0),
     ]
 
-    # Fixed Route chooses among eligible stations; chosen == recommended in B0.
     assert [
         (r.recommended_station, r.chosen_station)
         for r in events("ROUTE_DECISION")

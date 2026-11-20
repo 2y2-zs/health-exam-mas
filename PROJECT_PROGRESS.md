@@ -20,7 +20,7 @@ From the repository root in PowerShell, the full development check is:
 .\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider -o pythonpath=src
 ```
 
-The two failures are in the native SimPy path: [patient ordering on simultaneous requests](tests/test_model0_same_time_probe.py#L67) and [T06 raw order at t=4](tests/test_model0_t06.py#L336). Both scenarios were also checked through the migrated coordinator with A/B/C configured. In the first, A served u1 then u2 under both registration orders. In T06, the original relevant t=4 event order was preserved and departures occurred at t=8, 12, 16 and 20. The package-only T01 smoke check used A/B/C and recorded departure at t=8.
+The two failures are in the native SimPy path: [patient ordering on simultaneous requests](tests/test_model0_same_time_probe.py#L57) and [T06 raw order at t=4](tests/test_model0_t06.py#L311). Both scenarios were also checked through the migrated coordinator with A/B/C configured. In the first, A served u1 then u2 under both registration orders. In T06, the original relevant t=4 event order was preserved and departures occurred at t=8, 12, 16 and 20. The package-only T01 smoke check used A/B/C and recorded departure at t=8.
 
 These are development diagnostics using synthetic inputs. The student's acceptance record should include the commit, environment, commands, independently derived expectations, raw traces and pass/fail results.
 

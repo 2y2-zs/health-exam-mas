@@ -1,6 +1,3 @@
-
-"""Tests for multi-station coordination components and boundaries."""
-
 from dataclasses import replace
 
 import pytest
@@ -47,8 +44,6 @@ B_ONLY = PackageConfig(
 def test_ab_coordinator_registration_has_stable_order(
     insertion_order,
 ):
-    """Both insertion orders produce the same A -> B traversal."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(
@@ -116,8 +111,6 @@ def test_ab_coordinator_registration_has_stable_order(
 
 @pytest.mark.parametrize("insertion_order", [("A", "B", "C"), ("C", "B", "A")])
 def test_abc_coordinator_registers_c_in_stable_order(insertion_order):
-    """Register C with the Model 0 capacity and service duration."""
-
     env = simpy.Environment()
     stations = {
         station_id: AOnlyCoordinatedStation(env, station_id=station_id)
@@ -147,8 +140,6 @@ def test_abc_coordinator_registers_c_in_stable_order(insertion_order):
     ],
 )
 def test_coordinator_rejects_different_environments(station_ids, foreign_station):
-    """Each station must share the Coordinator Environment."""
-
     env = simpy.Environment()
     other_env = simpy.Environment()
 
@@ -188,8 +179,6 @@ def test_coordinator_rejects_different_environments(station_ids, foreign_station
     ],
 )
 def test_coordinator_rejects_station_id_mismatch(station_ids, wrong_key, other_station):
-    """A dictionary key must match the station's ID."""
-
     env = simpy.Environment()
     stations = {
         station_id: AOnlyCoordinatedStation(env, station_id=station_id)
@@ -224,8 +213,6 @@ def test_coordinator_rejects_station_id_mismatch(station_ids, wrong_key, other_s
     ],
 )
 def test_coordinator_rejects_missing_or_extra_stations(keys):
-    """The registry requires A and B and accepts C as the third station."""
-
     env = simpy.Environment()
     stations = {
         station_id: AOnlyCoordinatedStation(
@@ -252,7 +239,7 @@ def test_coordinator_rejects_missing_or_extra_stations(keys):
 
 
 def prepare_ab_services_ending_at_t4():
-    """Prepare A [0,4) and B [1,4), without a Coordinator run()."""
+    """Arrange simultaneous A and B completions at t=4."""
 
     env = simpy.Environment()
 
@@ -287,7 +274,6 @@ def prepare_ab_services_ending_at_t4():
         package=B_ONLY,
     )
 
-    # A service [0,4).
     patient_a.location = "A"
     patient_a.state = PatientState.TRAVELLING
 
@@ -297,7 +283,6 @@ def prepare_ab_services_ending_at_t4():
     assert patient_a.state == PatientState.IN_SERVICE
     assert station_a.resource.count == 1
 
-    # B service [1,4).
     env.run(until=1.0)
 
     assert env.now == 1.0
@@ -329,8 +314,6 @@ def prepare_ab_services_ending_at_t4():
 
 
 def test_complete_due_services_all_ends_before_any_release():
-    """At t=4, both SERVICE_END records precede all releases."""
-
     (
         env,
         coordinator,
@@ -490,8 +473,6 @@ def test_complete_due_services_all_ends_before_any_release():
 
 
 def test_complete_due_services_without_due_has_no_side_effects():
-    """At t=2, neither A [0,4) nor B [1,4) has finished."""
-
     (
         env,
         coordinator,
@@ -596,8 +577,6 @@ def test_complete_due_services_without_due_has_no_side_effects():
 
 
 def test_next_service_completion_time_both_end_at_t4_is_pure():
-    """A [0,4) and B [1,4) both produce a next completion time of 4."""
-
     (
         env,
         coordinator,
@@ -691,8 +670,6 @@ def test_next_service_completion_time_both_end_at_t4_is_pure():
 
 
 def test_next_service_completion_time_updates_after_a_release():
-    """A [0,4), B [2,5): query 4, then 5 after A is released."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(
@@ -834,8 +811,6 @@ def test_next_service_completion_time_updates_after_a_release():
 
 
 def test_next_service_completion_time_none_when_no_active_visits():
-    """None means no active service, even when a station has waiting work."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(
@@ -907,8 +882,6 @@ def test_next_service_completion_time_none_when_no_active_visits():
 
 
 def test_next_service_completion_time_rejects_overdue_active_visit():
-    """An active visit ending before env.now must raise without mutation."""
-
     (
         env,
         coordinator,
@@ -1007,8 +980,6 @@ def test_next_service_completion_time_rejects_overdue_active_visit():
 
 
 def test_process_next_service_completion_same_time_batch():
-    """Generator waits until t=4 and commits A/B together."""
-
     (
         env,
         coordinator,
@@ -1087,8 +1058,6 @@ def test_process_next_service_completion_same_time_batch():
 
 
 def test_process_next_service_completion_staggered_batches():
-    """A finishes at 4; the next generator call finishes B at 5."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -1209,8 +1178,6 @@ def test_process_next_service_completion_staggered_batches():
 
 
 def test_process_next_service_completion_due_now():
-    """When completion is due at env.now, no timeout is needed."""
-
     (
         env,
         coordinator,
@@ -1264,8 +1231,6 @@ def test_process_next_service_completion_due_now():
 
 
 def test_process_next_service_completion_without_active_service():
-    """No active service returns [] without time advance or queue mutation."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -1335,8 +1300,6 @@ def test_process_next_service_completion_without_active_service():
 
 
 def test_dispatch_available_services_starts_both_idle_stations():
-    """Both A and B start their waiting patient immediately at t=0."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(
@@ -1453,8 +1416,6 @@ def test_dispatch_available_services_starts_both_idle_stations():
 
 
 def test_dispatch_available_services_when_full_is_idempotent():
-    """Repeated Phase 5 dispatch cannot start another visit at capacity."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -1582,8 +1543,6 @@ def test_dispatch_available_services_when_full_is_idempotent():
 
 
 def test_dispatch_available_services_starts_waiters_at_release_time():
-    """Phase 5 can reuse capacity at t=4 after synchronous Phase 0/1."""
-
     (
         env,
         coordinator,
@@ -1777,8 +1736,6 @@ def test_dispatch_available_services_starts_waiters_at_release_time():
 
 
 def test_register_arrival_accepts_now_and_future_without_admission():
-    """Registration stores plans only; current-time arrivals are allowed."""
-
     env = simpy.Environment()
     env.run(until=4.0)
 
@@ -1843,8 +1800,6 @@ def test_register_arrival_accepts_now_and_future_without_admission():
 
 
 def test_register_arrival_rejects_duplicate_patient_id_without_side_effects():
-    """Reject repeated objects and distinct objects sharing an ID."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -1940,8 +1895,6 @@ def test_register_arrival_rejects_duplicate_patient_id_without_side_effects():
 
 
 def test_register_arrival_rejects_past_time_without_side_effects():
-    """An arrival before env.now is invalid and cannot alter plans."""
-
     env = simpy.Environment()
     env.run(until=4.0)
 
@@ -2030,18 +1983,7 @@ def test_register_arrival_rejects_past_time_without_side_effects():
         assert station.peak_resource_count == 0
 
 
-# ==========================================================
-# Phase 2 batch-arrival tests
-# ==========================================================
-
-
 def test_commit_due_arrivals_stable_order_and_future_preservation():
-    """Reverse registration must yield rank/ID order at t=4.
-
-    Future plans remain pending. Phase 2 has no routing, travel,
-    queue or service side effects.
-    """
-
     env = simpy.Environment()
     env.run(until=4.0)
 
@@ -2138,8 +2080,6 @@ def test_commit_due_arrivals_stable_order_and_future_preservation():
 
 
 def test_commit_due_arrivals_consumed_id_remains_reserved():
-    """An ID remains registered after its arrival plan is consumed."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -2209,8 +2149,6 @@ def test_commit_due_arrivals_consumed_id_remains_reserved():
 
 
 def test_commit_due_arrivals_rejects_overdue_plan_without_mutation():
-    """Overdue work blocks the entire Phase 2 batch, including due-now work."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -2275,8 +2213,6 @@ def test_commit_due_arrivals_rejects_overdue_plan_without_mutation():
 
 
 def test_commit_due_arrivals_prevalidates_full_batch():
-    """One invalid patient must prevent every ARRIVAL in the batch."""
-
     env = simpy.Environment()
     env.run(until=4.0)
 
@@ -2367,17 +2303,7 @@ def test_commit_due_arrivals_prevalidates_full_batch():
     ]
 
 
-# ==========================================================
-# New next_event_time() tests
-# ==========================================================
-
-
 def test_next_event_time_arrival_precedes_service_completion():
-    """Arrival@2 must win over active A service completion@4.
-
-    The query must not commit either event or advance time.
-    """
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -2441,8 +2367,6 @@ def test_next_event_time_arrival_precedes_service_completion():
     assert station_b.active == {}
     assert station_b.resource.count == 0
 
-    # Even though the next event is at t=2, querying does not
-    # advance the simulation or record ARRIVAL.
     assert not [
         record
         for record in log.records
@@ -2451,8 +2375,6 @@ def test_next_event_time_arrival_precedes_service_completion():
 
 
 def test_next_event_time_tied_arrival_and_service_is_pure():
-    """Arrival@4 and both service completions@4 return 4 only."""
-
     (
         env,
         coordinator,
@@ -2481,8 +2403,6 @@ def test_next_event_time_tied_arrival_and_service_is_pure():
     assert log.records == records_before
     assert coordinator.pending_arrivals == [arrival]
 
-    # Reaching the due timestamp externally does not cause the
-    # pure query to execute Phase 0/1 or Phase 2.
     env.run(until=4.0)
 
     assert env.now == 4.0
@@ -2509,7 +2429,6 @@ def test_next_event_time_tied_arrival_and_service_is_pure():
     assert arrival_patient.state == PatientState.ARRIVED
     assert arrival_patient.location == "ENTRY"
 
-    # No new Phase 0, Phase 1, Phase 2 or later records.
     assert not [
         record
         for record in log.records
@@ -2523,8 +2442,6 @@ def test_next_event_time_tied_arrival_and_service_is_pure():
 
 
 def test_next_event_time_only_future_arrival():
-    """With no active service, Arrival@6 is still an event at t=6."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -2569,8 +2486,6 @@ def test_next_event_time_only_future_arrival():
 
 
 def test_next_event_time_rejects_overdue_arrival_without_mutation():
-    """An uncommitted Arrival@1 at t=2 must raise, even with due-now work."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -2634,11 +2549,6 @@ def test_next_event_time_rejects_overdue_arrival_without_mutation():
 
 
 def test_next_event_time_rejects_overdue_service_without_mutation():
-    """An active service ending at t=4 is overdue at t=4.5.
-
-    A valid future arrival must not hide the overdue service.
-    """
-
     (
         env,
         coordinator,
@@ -2654,7 +2564,6 @@ def test_next_event_time_rejects_overdue_service_without_mutation():
 
     coordinator.register_arrival(future_plan)
 
-    # Deliberately skip committing t=4 completions.
     env.run(until=4.5)
 
     assert env.now == 4.5
@@ -2708,8 +2617,6 @@ def test_next_event_time_rejects_overdue_service_without_mutation():
 
 
 def test_next_event_time_none_does_not_mean_simulation_drained():
-    """No arrival or active service returns None even with a waiting patient."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -2722,12 +2629,10 @@ def test_next_event_time_none_does_not_mean_simulation_drained():
         log,
     )
 
-    # Truly empty scheduling sources.
     assert coordinator.pending_arrivals == []
     assert coordinator.next_service_completion_time() is None
     assert coordinator.next_event_time() is None
 
-    # Populate a waiting queue without starting a service.
     patient = PatientAgent("waiting", 1, A_ONLY)
     patient.location = "A"
     patient.state = PatientState.TRAVELLING
@@ -2741,8 +2646,6 @@ def test_next_event_time_none_does_not_mean_simulation_drained():
     records_before = list(log.records)
     waiting_before = list(station_a.waiting)
 
-    # This still returns None, because neither of the two
-    # currently supported event sources has a scheduled event.
     assert coordinator.next_event_time() is None
     assert coordinator.next_event_time() is None
 
@@ -2764,20 +2667,7 @@ def test_next_event_time_none_does_not_mean_simulation_drained():
         assert station.resource.queue == []
         assert station.release_count == 0
 
-    # A waiting patient still exists: None is NOT a completion signal.
-
-# ==========================================================
-# Unified event-bucket generator tests: Phase 0-2 only
-# ==========================================================
-
-
 def test_process_next_event_bucket_arrival_before_service():
-    """Arrival@2 precedes A service completion@4.
-
-    The first bucket processes only Phase 2 at t=2.
-    The second bucket processes A Phase 0/1 at t=4.
-    """
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -2805,7 +2695,6 @@ def test_process_next_event_bucket_arrival_before_service():
         B_ONLY,
     )
 
-    # Start A's [0,4) service as an existing component fixture.
     service_patient.location = "A"
     service_patient.state = PatientState.TRAVELLING
 
@@ -2823,7 +2712,6 @@ def test_process_next_event_bucket_arrival_before_service():
 
     assert coordinator.next_event_time() == 2.0
 
-    # First invocation: only the next event bucket.
     first = env.process(
         coordinator.process_next_event_bucket()
     )
@@ -2839,13 +2727,11 @@ def test_process_next_event_bucket_arrival_before_service():
     assert len(arrived) == 1
     assert arrived[0] is arrival_patient
 
-    # Arrival is committed, but the patient is not yet routed.
     assert coordinator.pending_arrivals == []
     assert arrival_patient.state == PatientState.ARRIVED
     assert arrival_patient.location == "ENTRY"
     assert arrival_patient.completed_tests == set()
 
-    # A's service is still active and ends at t=4.
     assert service_patient.state == PatientState.IN_SERVICE
     assert service_patient.completed_tests == set()
 
@@ -2857,7 +2743,6 @@ def test_process_next_event_bucket_arrival_before_service():
     assert station_b.active == {}
     assert station_b.resource.count == 0
 
-    # The original log must contain no premature service completion.
     assert [
         (
             record.sim_time,
@@ -2875,7 +2760,6 @@ def test_process_next_event_bucket_arrival_before_service():
 
     assert coordinator.next_event_time() == 4.0
 
-    # Second invocation: now finish A's service at t=4.
     second = env.process(
         coordinator.process_next_event_bucket()
     )
@@ -2898,7 +2782,6 @@ def test_process_next_event_bucket_arrival_before_service():
     assert station_a.resource.count == 0
     assert station_a.release_count == 1
 
-    # Exact original append order across both event buckets.
     assert [
         (
             record.sim_time,
@@ -2926,20 +2809,6 @@ def test_process_next_event_bucket_arrival_before_service():
 
 
 def test_process_next_event_bucket_same_time_global_phase_order():
-    """A/B completions and three arrivals share t=4.
-
-    Expected raw ordering:
-        SERVICE_END A
-        SERVICE_END B
-        RESOURCE_RELEASE A
-        RESOURCE_RELEASE B
-        ARRIVAL z0
-        ARRIVAL z1
-        ARRIVAL z2
-
-    Arrival ordering uses rank, then patient_id.
-    """
-
     (
         env,
         coordinator,
@@ -2952,7 +2821,6 @@ def test_process_next_event_bucket_same_time_global_phase_order():
 
     assert env.now == 1.0
 
-    # Two arrivals share rank=1; IDs break the tie.
     z2 = PatientAgent("z2", 2, A_ONLY)
     z1 = PatientAgent("z1", 1, B_ONLY)
     z0 = PatientAgent("z0", 1, A_ONLY)
@@ -2964,7 +2832,6 @@ def test_process_next_event_bucket_same_time_global_phase_order():
     plan_z0 = ScheduledArrival(4.0, z0)
     future_plan = ScheduledArrival(6.0, future)
 
-    # Deliberately use reverse order for the due arrivals.
     coordinator.register_arrival(plan_z2)
     coordinator.register_arrival(future_plan)
     coordinator.register_arrival(plan_z1)
@@ -2983,19 +2850,15 @@ def test_process_next_event_bucket_same_time_global_phase_order():
 
     released, arrived = process.value
 
-    # Phase 0/1 releases are returned in A -> B order.
     assert len(released) == 2
     assert released[0] is patient_a
     assert released[1] is patient_b
 
-    # Phase 2 arrivals are returned by rank then ID.
     assert len(arrived) == 3
     assert arrived[0] is z0
     assert arrived[1] is z1
     assert arrived[2] is z2
 
-    # Compare the ENTIRE original EventLog append order.
-    # Do not sort the log for this assertion.
     actual_raw = [
         (
             record.sim_time,
@@ -3027,8 +2890,6 @@ def test_process_next_event_bucket_same_time_global_phase_order():
 
     assert actual_raw == expected_raw
 
-    # All service ends precede every release;
-    # every release precedes every ARRIVAL.
     t4 = [
         record
         for record in log.records
@@ -3054,7 +2915,6 @@ def test_process_next_event_bucket_same_time_global_phase_order():
         for record in log.records
     ] == list(range(1, len(log.records) + 1))
 
-    # Original A and B services are fully released.
     assert patient_a.state == PatientState.FINISHED
     assert patient_a.completed_tests == {"A"}
 
@@ -3069,7 +2929,6 @@ def test_process_next_event_bucket_same_time_global_phase_order():
         assert station.resource.queue == []
         assert station.release_count == 1
 
-    # The newly arrived patients have not routed or queued.
     for patient in (z0, z1, z2, future):
         assert patient.state == PatientState.ARRIVED
         assert patient.location == "ENTRY"
@@ -3077,21 +2936,17 @@ def test_process_next_event_bucket_same_time_global_phase_order():
         assert patient.active_visit_id is None
         assert patient.active_station_id is None
 
-    # The future arrival is not consumed.
     assert len(coordinator.pending_arrivals) == 1
     assert coordinator.pending_arrivals[0] is future_plan
 
     assert coordinator.next_event_time() == 6.0
 
-    # Repeating the same bucket would find the future event;
-    # there is no duplicate ARRIVAL at t=4.
     assert len([
         record
         for record in log.records
         if record.event_type == "ARRIVAL"
     ]) == 3
 
-    # No Phase 3, 4 or 5 events are generated by the bucket method.
     assert not [
         record
         for record in log.records
@@ -3105,8 +2960,6 @@ def test_process_next_event_bucket_same_time_global_phase_order():
 
 
 def test_process_next_event_bucket_event_due_now():
-    """Due-now arrival is committed without moving the clock."""
-
     env = simpy.Environment()
     env.run(until=4.0)
 
@@ -3172,7 +3025,6 @@ def test_process_next_event_bucket_event_due_now():
         assert station.resource.users == []
         assert station.resource.queue == []
 
-    # A second invocation has no scheduled event.
     second = env.process(
         coordinator.process_next_event_bucket()
     )
@@ -3185,8 +3037,6 @@ def test_process_next_event_bucket_event_due_now():
 
 
 def test_process_next_event_bucket_no_scheduled_event():
-    """No event returns two empty lists, even with waiting work."""
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(env, station_id="A")
@@ -3205,8 +3055,6 @@ def test_process_next_event_bucket_no_scheduled_event():
 
     assert coordinator.next_event_time() is None
 
-    # A patient can remain waiting even when there is no scheduled
-    # arrival or active service completion.
     patient = PatientAgent("waiting", 1, A_ONLY)
 
     patient.location = "A"
@@ -3233,7 +3081,6 @@ def test_process_next_event_bucket_no_scheduled_event():
     assert process.value == ([], [])
     assert env.now == 0
 
-    # No event or patient state was changed.
     assert log.records == records_before
     assert coordinator.pending_arrivals == []
 
@@ -3252,13 +3099,6 @@ def test_process_next_event_bucket_no_scheduled_event():
         assert station.resource.users == []
         assert station.resource.queue == []
         assert station.release_count == 0
-
-    # The absence of scheduled events is not proof that the
-    # domain has no remaining work.
-
-# ==========================================================
-# Phase 3: ENTRY -> first station, zero-time travel
-# ==========================================================
 
 from health_exam_mas.model0 import P1_CONFIG
 
@@ -3281,8 +3121,6 @@ def _make_ab_phase3_fixture(*, run_id: str = "AB_PHASE3_ENTRY"):
 
 
 def test_route_entry_arrivals_p1_reaches_a_without_queue_or_resource():
-    """P1 arrives at t=0, then moves ENTRY -> A in Phase 3."""
-
     env, coordinator, station_a, station_b, log = (
         _make_ab_phase3_fixture()
     )
@@ -3293,7 +3131,6 @@ def test_route_entry_arrivals_p1_reaches_a_without_queue_or_resource():
         ScheduledArrival(at=0.0, patient=patient)
     )
 
-    # Phase 2: the ARRIVAL must actually be committed first.
     arrived = coordinator.commit_due_arrivals()
 
     assert len(arrived) == 1
@@ -3309,7 +3146,6 @@ def test_route_entry_arrivals_p1_reaches_a_without_queue_or_resource():
         (2, "ARRIVAL"),
     ]
 
-    # Phase 3: a separate synchronous call.
     ready = coordinator.route_entry_arrivals(arrived)
 
     assert len(ready) == 1
@@ -3324,7 +3160,6 @@ def test_route_entry_arrivals_p1_reaches_a_without_queue_or_resource():
     assert patient.active_visit_id is None
     assert patient.active_station_id is None
 
-    # Verify the exact state-transition contract.
     assert [
         (
             r.phase,
@@ -3381,7 +3216,6 @@ def test_route_entry_arrivals_p1_reaches_a_without_queue_or_resource():
         r.sequence_id for r in log.records
     ] == list(range(1, len(log.records) + 1))
 
-    # ENTRY travel does not perform Phase 4 or Phase 5.
     for station in (station_a, station_b):
         assert station.waiting == []
         assert station.active == {}
@@ -3398,11 +3232,6 @@ def test_route_entry_arrivals_p1_reaches_a_without_queue_or_resource():
 
 
 def test_route_entry_arrivals_stable_order_with_reverse_input():
-    """Phase 3 sorts by rank and ID, regardless of input order.
-
-    All TRAVEL_START records precede all zero-time TRAVEL_END records.
-    """
-
     env, coordinator, station_a, station_b, log = (
         _make_ab_phase3_fixture()
     )
@@ -3411,7 +3240,6 @@ def test_route_entry_arrivals_stable_order_with_reverse_input():
     u2 = PatientAgent("u2", 1, B_ONLY)
     u1 = PatientAgent("u1", 1, P1_CONFIG)
 
-    # Reverse registration order.
     for patient in (u3, u2, u1):
         coordinator.register_arrival(
             ScheduledArrival(0.0, patient)
@@ -3421,7 +3249,6 @@ def test_route_entry_arrivals_stable_order_with_reverse_input():
 
     assert arrived == [u1, u2, u3]
 
-    # Deliberately reverse the list again before Phase 3.
     ready = coordinator.route_entry_arrivals(
         list(reversed(arrived))
     )
@@ -3505,8 +3332,6 @@ def test_route_entry_arrivals_stable_order_with_reverse_input():
 def test_route_entry_arrivals_rejects_invalid_batch_atomically(
     failure,
 ):
-    """An invalid later item cannot partially route an earlier patient."""
-
     env, coordinator, station_a, station_b, log = (
         _make_ab_phase3_fixture()
     )
@@ -3514,7 +3339,6 @@ def test_route_entry_arrivals_rejects_invalid_batch_atomically(
     valid = PatientAgent("u1", 1, P1_CONFIG)
 
     if failure == "unmanaged_destination":
-        # C is eligible for this package, but not managed by A/B.
         c_only = PackageConfig(
             required_tests=frozenset({"C"}),
             fixed_route=("C",),
@@ -3562,7 +3386,6 @@ def test_route_entry_arrivals_rejects_invalid_batch_atomically(
     with pytest.raises(ValueError, match=error_message):
         coordinator.route_entry_arrivals(batch)
 
-    # No Phase 3 event was appended for ANY patient.
     assert log.records == log_before
     assert all(r.phase == 2 for r in log.records)
 
@@ -3592,13 +3415,10 @@ def test_route_entry_arrivals_rejects_invalid_batch_atomically(
         assert station.resource.users == []
         assert station.resource.queue == []
 
-    # The original Phase 2 result is still usable after an error.
     assert arrived == [valid, second]
 
 
 def test_route_entry_arrivals_cannot_move_patient_twice():
-    """A completed ENTRY move cannot be committed again."""
-
     env, coordinator, station_a, station_b, log = (
         _make_ab_phase3_fixture()
     )
@@ -3650,8 +3470,6 @@ def test_route_entry_arrivals_cannot_move_patient_twice():
 
 
 def test_route_entry_arrivals_requires_actual_phase2_admission():
-    """Registration alone is insufficient; a cloned ID is insufficient."""
-
     env, coordinator, station_a, station_b, log = (
         _make_ab_phase3_fixture()
     )
@@ -3662,7 +3480,6 @@ def test_route_entry_arrivals_requires_actual_phase2_admission():
         ScheduledArrival(0.0, patient)
     )
 
-    # A registered but not yet admitted patient cannot move.
     with pytest.raises(
         ValueError,
         match="has not been admitted",
@@ -3675,8 +3492,6 @@ def test_route_entry_arrivals_requires_actual_phase2_admission():
 
     arrived = coordinator.commit_due_arrivals()
 
-    # Even after admission, a different object with the same ID
-    # cannot impersonate the actual Phase 2 patient.
     impostor = PatientAgent("u1", 1, P1_CONFIG)
 
     log_before = list(log.records)
@@ -3691,7 +3506,6 @@ def test_route_entry_arrivals_requires_actual_phase2_admission():
     assert patient.state == PatientState.ARRIVED
     assert patient.location == "ENTRY"
 
-    # The true admitted patient can still route successfully.
     assert coordinator.route_entry_arrivals(arrived) == [patient]
 
     assert patient.state == PatientState.TRAVELLING
@@ -3709,14 +3523,7 @@ def test_route_entry_arrivals_requires_actual_phase2_admission():
         assert station.resource.queue == []
 
 
-# ==========================================================
-# Phase 4: unified deterministic QUEUE_ENTRY
-# ==========================================================
-
-
 def test_commit_queue_entries_mixed_stations_stable_order():
-    """Station order A->B and rank/ID; no resource acquisition."""
-
     env, coordinator, station_a, station_b, log = (
         _make_ab_phase3_fixture()
     )
@@ -3727,7 +3534,6 @@ def test_commit_queue_entries_mixed_stations_stable_order():
     a1 = PatientAgent("a1", 1, P1_CONFIG)
     a0 = PatientAgent("a0", 1, P1_CONFIG)
 
-    # Reverse mixed-station registration order.
     for patient in (b1, a2, a1, a0):
         coordinator.register_arrival(
             ScheduledArrival(4.0, patient)
@@ -3762,7 +3568,6 @@ def test_commit_queue_entries_mixed_stations_stable_order():
     assert env.now == 4.0
     assert log.records[:len(phase23_prefix)] == phase23_prefix
 
-    # Phase 4 records are kept in their actual append order.
     queue_records = [
         r for r in log.records if r.event_type == "QUEUE_ENTRY"
     ]
@@ -3826,8 +3631,6 @@ def test_commit_queue_entries_mixed_stations_stable_order():
 
 
 def test_commit_queue_entries_rejects_repeated_queue_commit():
-    """A consumed ready record cannot trigger a second QUEUE_ENTRY."""
-
     env, coordinator, station_a, station_b, log = (
         _make_ab_phase3_fixture()
     )
@@ -3873,8 +3676,6 @@ def test_commit_queue_entries_rejects_repeated_queue_commit():
     ],
 )
 def test_commit_queue_entries_invalid_batch_is_atomic(failure):
-    """Prevalidate all members: bad later item cannot enqueue first."""
-
     env, coordinator, station_a, station_b, log = (
         _make_ab_phase3_fixture()
     )
@@ -3972,25 +3773,7 @@ def test_commit_queue_entries_invalid_batch_is_atomic(failure):
         1.0 if failure == "stale_travel_end" else 0.0
     )
 
-# ==========================================================
-# Integration: ENTRY -> Phase 2 -> 3 -> 4 -> 5 at t=0
-# ==========================================================
-
-
 def test_entry_flow_three_patients_through_phase5_at_t0():
-    """Integrate the existing Phase 0-2 bucket and Phase 3-5 methods.
-
-    Three patients arrive simultaneously at t=0, registered in
-    reverse rank order:
-
-        u1, rank 1, P1     -> A, IN_SERVICE
-        u2, rank 2, P1     -> A, WAITING
-        u3, rank 3, B_ONLY -> B, IN_SERVICE
-
-    The test stops immediately after Phase 5 at t=0.
-    No service completion, routing continuation or run() is invoked.
-    """
-
     env = simpy.Environment()
 
     station_a = AOnlyCoordinatedStation(
@@ -4004,7 +3787,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
 
     log = EventLog(run_id="AB_ENTRY_FLOW_INTEGRATION")
 
-    # Deliberately reverse the station dictionary order.
     coordinator = MultiStationCoordinator(
         env=env,
         stations={
@@ -4030,10 +3812,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         package=B_ONLY,
     )
 
-    # ------------------------------------------------------
-    # Registration only: reverse order u3 -> u2 -> u1.
-    # ------------------------------------------------------
-
     for patient in (u3, u2, u1):
         coordinator.register_arrival(
             ScheduledArrival(
@@ -4055,16 +3833,11 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         assert patient.location == "ENTRY"
         assert patient.completed_tests == set()
 
-    # No station work or resource ownership before admission.
     for station in (station_a, station_b):
         assert station.waiting == []
         assert station.active == {}
         assert station.resource.count == 0
         assert station.resource.queue == []
-
-    # ------------------------------------------------------
-    # Phase 0-2: process only the t=0 event bucket.
-    # ------------------------------------------------------
 
     assert coordinator.next_event_time() == 0.0
 
@@ -4072,8 +3845,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         coordinator.process_next_event_bucket()
     )
 
-    # IMPORTANT: run only until this Process completes.
-    # Do not call env.run(until=3) or env.run(until=4).
     env.run(until=bucket)
 
     assert bucket.triggered
@@ -4081,10 +3852,8 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
 
     released, arrived = bucket.value
 
-    # There were no active services before t=0.
     assert released == []
 
-    # Phase 2 must use rank/ID, not registration order.
     assert len(arrived) == 3
     assert arrived[0] is u1
     assert arrived[1] is u2
@@ -4105,10 +3874,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         assert patient.state == PatientState.ARRIVED
         assert patient.location == "ENTRY"
 
-    # ------------------------------------------------------
-    # Phase 3: synchronous zero-time ENTRY travel.
-    # ------------------------------------------------------
-
     ready = coordinator.route_entry_arrivals(arrived)
 
     assert len(ready) == 3
@@ -4127,7 +3892,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         assert patient.active_visit_id is None
         assert patient.active_station_id is None
 
-    # Every TRAVEL_END must have a matching ready record.
     assert set(coordinator._ready_for_queue) == {
         "u1",
         "u2",
@@ -4143,7 +3907,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         assert entry.station_id == patient.location
         assert entry.travel_ended_at == 0.0
 
-    # Movement alone does not enter queues or occupy Resources.
     for station in (station_a, station_b):
         assert station.waiting == []
         assert station.active == {}
@@ -4151,16 +3914,10 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         assert station.resource.users == []
         assert station.resource.queue == []
 
-    # ------------------------------------------------------
-    # Phase 4: unified queue entry, A then B.
-    # ------------------------------------------------------
-
-    # Deliberately reverse Phase 4 input as well.
     queued = coordinator.commit_queue_entries(
         list(reversed(ready))
     )
 
-    # Station A first, then B; rank/ID within each station.
     assert len(queued) == 3
     assert queued[0] is u1
     assert queued[1] is u2
@@ -4185,11 +3942,9 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         for visit in station_b.waiting
     ] == [u3]
 
-    # All waiting visits entered the domain queue at t=0.
     for visit in station_a.waiting + station_b.waiting:
         assert visit.entered_at == 0.0
 
-    # Phase 4 does not request SimPy Resource capacity.
     assert station_a.resource.count == 0
     assert station_b.resource.count == 0
 
@@ -4199,23 +3954,16 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
     assert station_a.resource.queue == []
     assert station_b.resource.queue == []
 
-    # ------------------------------------------------------
-    # Phase 5: explicit, independent service dispatch.
-    # ------------------------------------------------------
-
     coordinator.dispatch_available_services()
 
-    # The simulation is still at t=0.
     assert env.now == 0.0
 
-    # A: u1 starts first (FCFS), u2 stays in domain queue.
     assert u1.state == PatientState.IN_SERVICE
     assert u1.location == "A"
 
     assert u2.state == PatientState.WAITING
     assert u2.location == "A"
 
-    # B: u3 starts service immediately.
     assert u3.state == PatientState.IN_SERVICE
     assert u3.location == "B"
 
@@ -4223,14 +3971,12 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
     assert u2.completed_tests == set()
     assert u3.completed_tests == set()
 
-    # Verify exact domain waiting-queue contents.
     assert len(station_a.waiting) == 1
     assert station_a.waiting[0].patient is u2
     assert station_a.waiting[0].entered_at == 0.0
 
     assert station_b.waiting == []
 
-    # Verify exact active service ownership.
     assert len(station_a.active) == 1
     assert len(station_b.active) == 1
 
@@ -4240,8 +3986,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
     assert active_a.patient is u1
     assert active_b.patient is u3
 
-    # A lasts 4 time units; B lasts 3 time units.
-    # They have STARTED, not completed.
     assert active_a.ends_at == 4.0
     assert active_b.ends_at == 3.0
 
@@ -4253,7 +3997,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
     assert u2.active_visit_id is not None
     assert u3.active_visit_id is not None
 
-    # Each station has capacity 1 and exactly one active service.
     assert station_a.resource.count == 1
     assert station_b.resource.count == 1
 
@@ -4263,8 +4006,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
     assert station_a.resource.users[0] is active_a.request
     assert station_b.resource.users[0] is active_b.request
 
-    # Native SimPy queues must remain empty.
-    # u2 waits in station_a.waiting, NOT Resource.queue.
     assert station_a.resource.queue == []
     assert station_b.resource.queue == []
 
@@ -4273,11 +4014,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
 
     assert station_a.release_count == 0
     assert station_b.release_count == 0
-
-    # ------------------------------------------------------
-    # Exact RAW EventLog append order.
-    # No sorting or phase regrouping is allowed.
-    # ------------------------------------------------------
 
     actual_raw = [
         (
@@ -4290,12 +4026,10 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
     ]
 
     expected_raw = [
-        # Phase 2: all three arrivals.
         (2, "u1", "ARRIVAL", None),
         (2, "u2", "ARRIVAL", None),
         (2, "u3", "ARRIVAL", None),
 
-        # Phase 3: routing and travel starts, rank/ID order.
         (3, "u1", "NEEDS_ROUTING", None),
         (3, "u1", "DECIDING", None),
         (3, "u1", "ROUTE_DECISION", None),
@@ -4311,17 +4045,14 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         (3, "u3", "ROUTE_DECISION", None),
         (3, "u3", "TRAVEL_START", "B"),
 
-        # Phase 3: all zero-time travel completions.
         (3, "u1", "TRAVEL_END", "A"),
         (3, "u2", "TRAVEL_END", "A"),
         (3, "u3", "TRAVEL_END", "B"),
 
-        # Phase 4: all domain queue entries, A then B.
         (4, "u1", "QUEUE_ENTRY", "A"),
         (4, "u2", "QUEUE_ENTRY", "A"),
         (4, "u3", "QUEUE_ENTRY", "B"),
 
-        # Phase 5: only available services start.
         (5, "u1", "SERVICE_START", "A"),
         (5, "u3", "SERVICE_START", "B"),
     ]
@@ -4342,7 +4073,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         f"Full EventLog:\n{raw_log}"
     )
 
-    # All records belong to this same t=0 bucket.
     assert len(log.records) == 23
     assert all(
         record.sim_time == 0.0
@@ -4354,7 +4084,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         for record in log.records
     ] == list(range(1, len(log.records) + 1))
 
-    # The four used phases are strictly nondecreasing.
     assert [
         record.phase
         for record in log.records
@@ -4365,7 +4094,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         + [5] * 2
     )
 
-    # Verify event counts independently of expected_raw.
     assert sum(
         r.event_type == "ARRIVAL"
         for r in log.records
@@ -4386,7 +4114,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         for r in log.records
     ) == 2
 
-    # Verify individual TRAVEL_END -> QUEUE_ENTRY linkage.
     travel_ends = {
         r.patient_id: r
         for r in log.records
@@ -4410,7 +4137,6 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         assert travel_end.station_id == queue_entry.station_id
         assert travel_end.sequence_id < queue_entry.sequence_id
 
-    # No service completion or release is allowed in this test.
     assert not [
         r for r in log.records
         if r.event_type in (
@@ -4420,19 +4146,11 @@ def test_entry_flow_three_patients_through_phase5_at_t0():
         )
     ]
 
-    # The next scheduled event is B's completion at t=3,
-    # but the integration test stops at t=0.
     assert coordinator.next_event_time() == 3.0
     assert env.now == 0.0
 
 
-# ==========================================================
-# Positive-duration travel: registration only
-# ==========================================================
-
-
 def _prepare_released_p1_at_t4():
-    """P1 is admitted, served at A [0,4), and released for A -> B."""
     env = simpy.Environment()
     station_a = AOnlyCoordinatedStation(env, station_id="A")
     station_b = AOnlyCoordinatedStation(env, station_id="B")
@@ -4476,7 +4194,6 @@ def _prepare_released_p1_at_t4():
 
 
 def test_register_travel_p1_a_to_b_at_t4():
-    """Register A -> B [4,5); no TRAVEL_START or time advancement."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -4517,7 +4234,6 @@ def test_register_travel_p1_a_to_b_at_t4():
 
 
 def test_register_travel_rejects_duplicate_without_side_effects():
-    """A pending travel cannot be registered a second time."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -4559,7 +4275,6 @@ def test_register_travel_rejects_duplicate_without_side_effects():
     ],
 )
 def test_register_travel_invalid_plan_is_atomic(failure):
-    """All bad plans fail before state, EventLog or plan mutation."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -4633,13 +4348,7 @@ def test_register_travel_invalid_plan_is_atomic(failure):
         assert station.resource.queue == []
 
 
-# ==========================================================
-# Phase 3: start positive-duration continuation after release
-# ==========================================================
-
-
 def test_start_next_travel_p1_a_to_b_at_t4():
-    """P1 released at t=4 starts A -> B [4,5) without arriving at B."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -4688,8 +4397,6 @@ def test_start_next_travel_p1_a_to_b_at_t4():
         range(1, len(log.records) + 1)
     )
 
-    # Travel completion is now included in the pure next-event query.
-    # TRAVEL_END itself is still NOT committed in this task.
     assert coordinator.next_event_time() == 5.0
     assert coordinator._ready_for_queue == {}
     assert not [
@@ -4708,7 +4415,6 @@ def test_start_next_travel_p1_a_to_b_at_t4():
 
 
 def test_start_next_travel_rejects_existing_pending_without_side_effects():
-    """Registering the plan first must prevent a partial Phase 3 start."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -4745,7 +4451,6 @@ def test_start_next_travel_rejects_existing_pending_without_side_effects():
 
 
 def test_start_next_travel_rejects_second_start_without_side_effects():
-    """After TRAVEL_START the state is TRAVELLING; cannot start twice."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -4773,7 +4478,6 @@ def test_start_next_travel_rejects_second_start_without_side_effects():
     assert patient.location == "A"
     assert coordinator._ready_for_queue == {}
     assert sum(r.event_type == "TRAVEL_START" for r in log.records) == 2
-    # One zero-time ENTRY -> A and one positive-duration A -> B.
     for station in (station_a, station_b):
         assert station.waiting == []
         assert station.active == {}
@@ -4787,7 +4491,6 @@ def test_start_next_travel_rejects_second_start_without_side_effects():
     ["impostor", "wrong_state", "active_visit", "no_remaining_test"],
 )
 def test_start_next_travel_invalid_patient_has_no_side_effects(invalid):
-    """Invalid identity/state/visit/fixed-route leaves the batch intact."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -4844,17 +4547,7 @@ def test_start_next_travel_invalid_patient_has_no_side_effects(invalid):
         assert station.resource.queue == []
 
 
-# ==========================================================
-# Unified pure next-time query: arrivals, services and travels
-# ==========================================================
-
-
 def _prepare_p1_with_active_b_service_at_t4(b_start_at):
-    """P1 A [0,4) released at t=4; B service ends at b_start_at+3.
-
-    The independent B service is started with the existing Station
-    component. No Coordinator travel execution is involved.
-    """
     env = simpy.Environment()
     station_a = AOnlyCoordinatedStation(env, station_id="A")
     station_b = AOnlyCoordinatedStation(env, station_id="B")
@@ -4897,7 +4590,6 @@ def _prepare_p1_with_active_b_service_at_t4(b_start_at):
 
 
 def test_next_event_time_includes_started_p1_travel_at_t5_without_side_effects():
-    """P1 A -> B [4,5) contributes t=5 after A's release."""
     env, coordinator, station_a, station_b, log, p1 = (
         _prepare_released_p1_at_t4()
     )
@@ -4929,7 +4621,6 @@ def test_next_event_time_includes_started_p1_travel_at_t5_without_side_effects()
 
 
 def test_next_event_time_includes_registered_travel_before_start():
-    """A registered (but not started) plan is still a pending travel."""
     env, coordinator, _, _, log, p1 = _prepare_released_p1_at_t4()
     plan = ScheduledTravel(p1, "A", "B", 4.0, 5.0)
     coordinator.register_travel(plan)
@@ -4945,7 +4636,6 @@ def test_next_event_time_includes_registered_travel_before_start():
 
 
 def test_next_event_time_earlier_arrival_precedes_pending_travel():
-    """At t=4, arrival@4.5 must win over travel completion@5."""
     env, coordinator, _, _, log, p1 = _prepare_released_p1_at_t4()
     plan = coordinator.start_next_travel(p1)
     newcomer = PatientAgent("new", 2, B_ONLY)
@@ -4966,7 +4656,6 @@ def test_next_event_time_earlier_arrival_precedes_pending_travel():
 
 
 def test_next_event_time_earlier_service_precedes_pending_travel():
-    """B service end@4.5 must win over A->B travel end@5."""
     (
         env, coordinator, station_a, station_b, log, p1,
         b_patient, plan,
@@ -4991,7 +4680,6 @@ def test_next_event_time_earlier_service_precedes_pending_travel():
 
 
 def test_next_event_time_three_way_tie_at_t5_is_pure():
-    """Arrival, service and travel all due at 5; querying commits none."""
     (
         env, coordinator, station_a, station_b, log, p1,
         b_patient, travel,
@@ -5007,7 +4695,6 @@ def test_next_event_time_three_way_tie_at_t5_is_pure():
     assert coordinator.next_event_time() == 5.0
     assert env.now == 4.0
 
-    # External clock advance only: the Coordinator commits no phases.
     env.run(until=5.0)
     assert coordinator.next_event_time() == 5.0
     assert coordinator.next_event_time() == 5.0
@@ -5028,7 +4715,6 @@ def test_next_event_time_three_way_tie_at_t5_is_pure():
 
 
 def test_next_event_time_due_now_travel_does_not_commit_travel_end():
-    """Due travel@5 is returned even at env.now==5; no TRAVEL_END."""
     env, coordinator, station_a, station_b, log, p1 = (
         _prepare_released_p1_at_t4()
     )
@@ -5048,7 +4734,6 @@ def test_next_event_time_due_now_travel_does_not_commit_travel_end():
 
 
 def test_next_event_time_rejects_overdue_travel_without_mutation():
-    """An overdue travel is an error even with a future arrival pending."""
     env, coordinator, station_a, station_b, log, p1 = (
         _prepare_released_p1_at_t4()
     )
@@ -5090,13 +4775,7 @@ def test_next_event_time_rejects_overdue_travel_without_mutation():
         assert station.resource.queue == []
 
 
-# ==========================================================
-# Phase 3 positive-duration TRAVEL_END: synchronous batch
-# ==========================================================
-
-
 def test_commit_due_travels_p1_arrives_at_b_only_at_t5():
-    """A->B [4,5): nothing at 4.5; at 5 only TRAVEL_END and ready."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -5141,7 +4820,6 @@ def test_commit_due_travels_p1_arrives_at_b_only_at_t5():
     assert ready.station_id == "B"
     assert ready.travel_ended_at == 5.0
 
-    # No Phase 4 or Phase 5 is triggered by travel completion.
     assert not [r for r in log.records if r.sim_time == 5 and r.phase in (4, 5)]
     for station in (station_a, station_b):
         assert station.waiting == []
@@ -5152,7 +4830,6 @@ def test_commit_due_travels_p1_arrives_at_b_only_at_t5():
 
 
 def test_commit_due_travels_repeated_at_same_time_is_idempotent():
-    """A consumed plan can never produce a second TRAVEL_END."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -5180,7 +4857,6 @@ def test_commit_due_travels_repeated_at_same_time_is_idempotent():
 def test_commit_due_travels_registered_but_not_started_is_rejected(
     spoof_travelling,
 ):
-    """Registration alone is insufficient, even if state is spoofed."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -5212,10 +4888,6 @@ def test_commit_due_travels_registered_but_not_started_is_rejected(
 
 
 def _prepare_two_due_travels_at_t5():
-    """P1 A->B and B-then-A B->A both start at 4 and end at 5.
-
-    Register and start in reverse rank order to verify due-batch sorting.
-    """
     env = simpy.Environment()
     station_a = AOnlyCoordinatedStation(env, station_id="A")
     station_b = AOnlyCoordinatedStation(env, station_id="B")
@@ -5253,7 +4925,6 @@ def _prepare_two_due_travels_at_t5():
     assert a_patient.state == PatientState.NEEDS_ROUTING
     assert a_patient.location == "A"
 
-    # Reverse rank: b's travel is registered first, but due commits sort.
     b_travel = coordinator.start_next_travel(b_patient)
     a_travel = coordinator.start_next_travel(a_patient)
     assert b_travel.ends_at == a_travel.ends_at == 5.0
@@ -5266,7 +4937,6 @@ def _prepare_two_due_travels_at_t5():
 
 
 def test_commit_due_travels_stable_rank_order_and_ready_records():
-    """Two concurrent due travels commit by rank, not registration order."""
     (
         env, coordinator, station_a, station_b, log,
         a, b, a_plan, b_plan,
@@ -5310,7 +4980,6 @@ def test_commit_due_travels_stable_rank_order_and_ready_records():
     ],
 )
 def test_commit_due_travels_invalid_batch_is_atomic(invalid):
-    """A bad later plan rejects the *whole* due batch, including valid a."""
     (
         env, coordinator, station_a, station_b, log,
         a, b, a_plan, b_plan,
@@ -5351,7 +5020,7 @@ def test_commit_due_travels_invalid_batch_is_atomic(invalid):
     else:
         raise AssertionError(invalid)
 
-    # Snapshot AFTER deliberate fixture corruption, BEFORE the call.
+    # Snapshot the corrupted fixture to detect partial commits.
     records_before = list(log.records)
     plans_before = list(coordinator.pending_travels)
     ready_before = dict(coordinator._ready_for_queue)
@@ -5392,7 +5061,6 @@ def test_commit_due_travels_invalid_batch_is_atomic(invalid):
 
 
 def test_commit_due_travels_overdue_rejected_without_side_effects():
-    """No overdue plan may be consumed, even when another is due later."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -5425,7 +5093,6 @@ def test_commit_due_travels_overdue_rejected_without_side_effects():
 
 
 def test_commit_due_travels_consumes_due_but_preserves_future_plan():
-    """At t=5 consume A->B [4,5), retain B->A [5,6) unchanged."""
     env = simpy.Environment()
     station_a = AOnlyCoordinatedStation(env, station_id="A")
     station_b = AOnlyCoordinatedStation(env, station_id="B")
@@ -5490,7 +5157,6 @@ def test_commit_due_travels_consumes_due_but_preserves_future_plan():
 def test_phase5_dispatch_merges_same_time_arrival_and_continuation(
     newcomer_rank, first_id, second_id
 ):
-    """At t=5, B releases its old visit before two new requests compete."""
     env, coordinator, station_a, station_b, log, p1, old_b, travel = (
         _prepare_p1_with_active_b_service_at_t4(2.0)
     )
@@ -5561,7 +5227,6 @@ def test_phase5_dispatch_merges_same_time_arrival_and_continuation(
 
 @pytest.mark.parametrize("departure_time", [8.0, 9.0])
 def test_commit_departures_requires_final_release_in_current_bucket(departure_time):
-    """P1 can depart only in the bucket that releases its final B visit."""
     env, coordinator, station_a, station_b, log, patient = (
         _prepare_released_p1_at_t4()
     )
@@ -5624,7 +5289,6 @@ def test_commit_departures_requires_final_release_in_current_bucket(departure_ti
 
 
 def test_commit_departures_validates_full_batch_and_orders_by_rank():
-    """A finishes at t=4 after service [0,4), B after [1,4)."""
     env, coordinator, _, _, log = _make_ab_phase3_fixture()
     a_patient = PatientAgent("a", 2, A_ONLY)
     b_patient = PatientAgent("b", 1, B_ONLY)
@@ -5662,7 +5326,6 @@ def test_commit_departures_validates_full_batch_and_orders_by_rank():
 
 
 def test_run_coordinated_t01_p1_completes_a_then_b_at_t8():
-    """Drain one P1 from an empty A/B system without manual phase calls."""
     env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture()
     patient = PatientAgent("u1", 1, P1_CONFIG)
     coordinator.register_arrival(ScheduledArrival(0.0, patient))
@@ -5672,7 +5335,6 @@ def test_run_coordinated_t01_p1_completes_a_then_b_at_t8():
     env.process(coordinator.run())
     env.run()
 
-    # Manual oracle: A [0,4), A->B [4,5), B [5,8), with zero queue waits.
     expected = [
         (0.0, 2, "u1", "ARRIVAL", None),
         (0.0, 3, "u1", "NEEDS_ROUTING", None),
@@ -5739,7 +5401,6 @@ def test_run_coordinated_t01_p1_completes_a_then_b_at_t8():
 
 @pytest.mark.parametrize("paused_at", ["waiting", "admitted", "final_release"])
 def test_run_rejects_stalled_patients_without_mutation(paused_at):
-    """An empty event calendar is not proof that admitted patients departed."""
     env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture()
     package = B_ONLY if paused_at == "final_release" else P1_CONFIG
     patient = PatientAgent("u1", 1, package)
@@ -5834,7 +5495,6 @@ def _register_coordinated_t06_arrivals(
 
 
 def test_run_coordinated_t06_serves_existing_waiter_first():
-    """Reproduce T06 with simultaneous A release and two arrivals at t=4."""
     env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture()
     patients = _register_coordinated_t06_arrivals(coordinator)
 
@@ -5868,7 +5528,6 @@ def test_run_coordinated_t06_serves_existing_waiter_first():
         for r in t4 if r.event_type == "TRAVEL_END"
     ] == [(3, "u3", "A"), (3, "u4", "A")]
 
-    # Expected queue, service start and release times from the T06 trace.
     expected_visits = [
         ("u1", "A", 0.0, 0.0, 4.0),
         ("u2", "A", 1.0, 4.0, 8.0),
@@ -5913,7 +5572,6 @@ def test_run_coordinated_t06_serves_existing_waiter_first():
 
 
 def test_run_coordinated_t10_reproduces_event_trace():
-    """Fresh runs of T06 produce identical ordered domain events."""
     traces = []
     for run_id in ("AB_T10_FIRST", "AB_T10_SECOND"):
         env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture(
@@ -5947,7 +5605,6 @@ def test_run_coordinated_t10_reproduces_event_trace():
 
 
 def test_run_coordinated_t07_p3_departs_after_c_release():
-    """Complete the fixed P3 route and stop after the final departure."""
     env = simpy.Environment()
     stations = {
         station_id: AOnlyCoordinatedStation(env, station_id=station_id)
@@ -5970,7 +5627,6 @@ def test_run_coordinated_t07_p3_departs_after_c_release():
     assert env.now == 14.0
     assert all(record.patient_id == "u1" for record in log.records)
 
-    # Manual T07 timeline in the order the coordinator commits events.
     assert [
         (record.sim_time, record.phase, record.event_type, record.station_id)
         for record in log.records
@@ -6023,7 +5679,6 @@ def test_run_coordinated_t07_p3_departs_after_c_release():
 
 
 def test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter():
-    """Drain three same-time C-only patients through the full coordinator."""
     env = simpy.Environment()
     stations = {
         station_id: AOnlyCoordinatedStation(env, station_id=station_id)
@@ -6053,7 +5708,6 @@ def test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter():
         if record.event_type == "TRAVEL_END"
     ] == [("u1", 0.0, "C"), ("u2", 0.0, "C"), ("u3", 0.0, "C")]
 
-    # Omit entry routing details; retain every service and departure event.
     entry_flow_events = {
         "NEEDS_ROUTING", "DECIDING", "ROUTE_DECISION", "TRAVEL_START", "TRAVEL_END",
     }
@@ -6120,7 +5774,6 @@ def _make_coordinated_t04_scenario(fixed_route: tuple[str, ...]):
 
 
 def test_run_coordinated_t04_rejects_illegal_recommendation(monkeypatch):
-    """Reject C at entry even when the routing policy recommends it."""
     env, coordinator, stations, log, patient = _make_coordinated_t04_scenario(
         ("A", "B", "C")
     )
@@ -6152,7 +5805,6 @@ def test_run_coordinated_t04_rejects_illegal_recommendation(monkeypatch):
 
 
 def test_run_coordinated_t04_allows_alternative_route_a_c_b():
-    """Complete A, C, B under the same A-before-C precedence rule."""
     env, coordinator, stations, log, patient = _make_coordinated_t04_scenario(
         ("A", "C", "B")
     )
@@ -6214,7 +5866,6 @@ def test_run_coordinated_t04_allows_alternative_route_a_c_b():
 
 
 def test_run_coordinated_t05_counts_travel_separately_from_waiting():
-    """P1 reaches busy B before its queue wait begins."""
     env = simpy.Environment()
     stations = {
         station_id: AOnlyCoordinatedStation(env, station_id=station_id)
@@ -6246,7 +5897,7 @@ def test_run_coordinated_t05_counts_travel_separately_from_waiting():
         if record.event_type == "DEPARTURE"
     ] == [("u1", 10.0, 3), ("u2", 13.0, 3)]
 
-    # Manual times for travel start, queue entry, service start and release.
+    # Each tuple gives travel start, queue entry, service start and release.
     expected_visits = {
         ("u1", "A"): (0.0, 0.0, 0.0, 4.0),
         ("u1", "B"): (4.0, 5.0, 7.0, 10.0),
@@ -6318,7 +5969,6 @@ def test_run_coordinated_t05_counts_travel_separately_from_waiting():
 
 
 def test_run_coordinated_t09_accepts_at_cutoff_and_drains():
-    """A rejection-only time bucket leaves admitted patients in service."""
     env = simpy.Environment()
     stations = {
         station_id: AOnlyCoordinatedStation(env, station_id=station_id)
@@ -6331,7 +5981,6 @@ def test_run_coordinated_t09_accepts_at_cutoff_and_drains():
         coordinator.register_arrival(ScheduledArrival(arrival_time, patient))
 
     run = env.process(coordinator.run())
-    # Inspect after the rejection and before the first service completion.
     env.run(until=6.0)
     assert not run.triggered
     assert (u1.state, u2.state) == (PatientState.IN_SERVICE, PatientState.WAITING)
@@ -6344,7 +5993,6 @@ def test_run_coordinated_t09_accepts_at_cutoff_and_drains():
     env.run()
     assert run.triggered
     assert env.now == 15.0
-    # ARRIVAL records count admissions; rejected attempts are recorded separately.
     assert [
         (record.sim_time, record.phase, record.patient_id, record.event_type)
         for record in log.records
@@ -6398,7 +6046,6 @@ def test_run_coordinated_t09_accepts_at_cutoff_and_drains():
 
 
 def test_run_coordinated_t02_breaks_same_time_tie_by_patient_rank():
-    """Serve simultaneous P1 arrivals by rank despite reverse registration."""
     env, coordinator, station_a, station_b, log = _make_ab_phase3_fixture(
         run_id="AB_T02"
     )

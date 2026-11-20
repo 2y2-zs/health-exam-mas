@@ -1,11 +1,3 @@
-
-"""Single-station, deterministic coordination prototype for Model 0.
-
-Domain phases commit synchronously within each time bucket. Entry travel is
-zero-time; registered positive-duration travel joins the same station queue.
-This is separate from the native processes; multi-station flow is still pending.
-"""
-
 from typing import Iterable
 
 import simpy
@@ -26,8 +18,6 @@ from health_exam_mas.model0_station import ActiveVisit, AOnlyCoordinatedStation
 
 
 class AOnlyCoordinator:
-    """Own the six synchronous phases for one configured station."""
-
     def __init__(
         self,
         env: simpy.Environment,
@@ -46,7 +36,6 @@ class AOnlyCoordinator:
 
         self.pending = list(arrivals)
 
-        # Planned moves do not belong to the station waiting queue.
         self.pending_travels: list[ScheduledTravel] = []
 
         patient_ids = [
@@ -89,7 +78,7 @@ class AOnlyCoordinator:
                     "Patient must begin in ARRIVED state"
                 )
 
-        # Keep identities after their pending events have been consumed.
+        # Retain patient identities after their scheduled events are consumed.
         self._patients_by_id: dict[str, PatientAgent] = {}
         initial_patients = [item.patient for item in self.pending]
         initial_patients.extend(visit.patient for visit in station.active.values())
@@ -104,8 +93,6 @@ class AOnlyCoordinator:
         self,
         travel: ScheduledTravel,
     ) -> None:
-        """Register a positive travel plan without state, log or resource changes."""
-
         if travel.started_at != self.env.now:
             raise ValueError(
                 "Travel must start at current simulation time"
@@ -172,16 +159,10 @@ class AOnlyCoordinator:
         if any(item.patient is travel.patient for item in self.pending):
             raise ValueError("Patient already has a pending arrival")
 
-        # Register only after every validation succeeds.
         self.pending_travels.append(travel)
         self._patients_by_id[travel.patient.patient_id] = travel.patient
 
     def start_next_travel(self, patient: PatientAgent) -> ScheduledTravel:
-        """Phase 3 boundary: start P1 travel A -> B without advancing time.
-
-        Register the complete plan before emitting routing/travel events.
-        Failed validation leaves patient, log, and pending travel unchanged.
-        """
         if patient.state != PatientState.NEEDS_ROUTING:
             raise ValueError("start_next_travel requires NEEDS_ROUTING")
         if patient.active_visit_id is not None or patient.active_station_id is not None:
@@ -226,7 +207,6 @@ class AOnlyCoordinator:
             ends_at=self.env.now + duration,
         )
 
-        # Complete registration before changing state or writing events.
         self.register_travel(travel)
 
         transition_patient_state(
@@ -262,8 +242,6 @@ class AOnlyCoordinator:
         return travel
 
     def commit_due_travels(self) -> list[PatientAgent]:
-        """Phase 3: validate due moves, then commit locations without queue entry."""
-
         now = self.env.now
 
         if any(
@@ -286,7 +264,6 @@ class AOnlyCoordinator:
             ),
         )
 
-        # Validate the full batch before committing.
         for travel in due:
             patient = travel.patient
 
@@ -339,7 +316,6 @@ class AOnlyCoordinator:
                 phase=3,
             )
 
-        # Remove consumed plans; leave future plans intact.
         self.pending_travels = [
             travel
             for travel in self.pending_travels
@@ -355,8 +331,6 @@ class AOnlyCoordinator:
         self,
         released: Iterable[PatientAgent],
     ) -> None:
-        """Phase 3: validate the released batch before recording any departure."""
-
         released = list(released)
 
         for patient in released:
@@ -383,8 +357,6 @@ class AOnlyCoordinator:
             )
 
     def _next_event_time(self) -> float:
-        """Select a time bucket and reject stalled or overdue work."""
-
         times = [
             arrival.at
             for arrival in self.pending
@@ -416,8 +388,6 @@ class AOnlyCoordinator:
         return min(times)
 
     def _commit_arrivals(self) -> list[PatientAgent]:
-        """Phase 2: record all arrivals before routing any patient."""
-
         batch = sorted(
             (
                 item.patient
@@ -451,8 +421,6 @@ class AOnlyCoordinator:
         self,
         batch: list[PatientAgent],
     ) -> list[PatientAgent]:
-        """Phase 3: route entry arrivals and finish their zero-time moves."""
-
         zero_travel_completions: list[
             tuple[PatientAgent, str]
         ] = []
@@ -528,8 +496,6 @@ class AOnlyCoordinator:
                 (patient, station_id)
             )
 
-        # Commit all entry zero-time travel in Phase 3.
-        # No timeout(0), no yield.
         for patient, station_id in zero_travel_completions:
             patient.location = station_id
 
@@ -545,7 +511,7 @@ class AOnlyCoordinator:
         return [patient for patient, _ in zero_travel_completions]
 
     def run(self):
-        """Run synchronous phases, yielding only between time buckets."""
+        """Yield only between simulation timestamps."""
 
         while (
             self.pending
@@ -559,21 +525,17 @@ class AOnlyCoordinator:
             if next_time != self.env.now:
                 raise RuntimeError("Coordinator failed to reach next time bucket")
 
-            # Phase 0: complete every due service before any release.
             completed = self.station.close_services(self.event_log)
 
-            # Phase 1: release resources and commit patient progress.
             released = self.station.release_services(completed, self.event_log)
 
-            # Phase 2: admit all arrivals in the current time bucket.
             batch = self._commit_arrivals()
 
-            # Phase 3: departures, due travel, then entry routing and zero moves.
             self.commit_departures(released)
             positive_travel_completions = self.commit_due_travels()
             zero_travel_completions = self._route_entry_arrivals(batch)
 
-            # Phase 4: merge all ready patients before queue entry.
+            # Rank entry trips and transfers together before dispatch.
             ready_to_queue = positive_travel_completions + zero_travel_completions
             ready_ids = [patient.patient_id for patient in ready_to_queue]
             if len(ready_ids) != len(set(ready_ids)):
@@ -585,7 +547,6 @@ class AOnlyCoordinator:
             for patient in ready_to_queue:
                 self.station.enqueue(patient, self.event_log)
 
-            # Phase 5: select FCFS visits and request only available capacity.
             self.station.start_available(self.event_log)
             if self.station.resource.queue:
                 raise RuntimeError("Unexpected Resource waiting requests")

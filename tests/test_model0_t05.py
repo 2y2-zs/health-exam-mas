@@ -1,5 +1,3 @@
-"""T05: travel time and waiting time are distinct in a shared station."""
-
 import simpy
 
 from health_exam_mas.model0 import (
@@ -15,7 +13,6 @@ from health_exam_mas.model0 import (
 
 
 def test_t05_travel_time_is_not_queue_waiting_time():
-    # Test-only P2 package; the production P1 configuration is unchanged.
     p2_config = PackageConfig(
         required_tests=frozenset({"B", "C"}),
         fixed_route=("B", "C"),
@@ -55,7 +52,6 @@ def test_t05_travel_time_is_not_queue_waiting_time():
         assert len(found) == 1, (patient_id, event_type, station_id, found)
         return found[0]
 
-    # Fixed expected timeline, independently calculated from the scenario.
     assert only("u1", "ARRIVAL").sim_time == 0.0
     assert only("u2", "ARRIVAL").sim_time == 4.0
 
@@ -71,12 +67,11 @@ def test_t05_travel_time_is_not_queue_waiting_time():
         assert (start.sim_time, end.sim_time) == expected_interval
         assert start.visit_id == end.visit_id
 
-    # Movement is measured by TRAVEL_START -> TRAVEL_END, not by queue entry.
     expected_travel = {
-        ("u1", "A"): (0.0, 0.0),  # ENTRY -> A
-        ("u1", "B"): (4.0, 5.0),  # A -> B
-        ("u2", "B"): (4.0, 4.0),  # ENTRY -> B
-        ("u2", "C"): (7.0, 8.0),  # B -> C
+        ("u1", "A"): (0.0, 0.0),
+        ("u1", "B"): (4.0, 5.0),
+        ("u2", "B"): (4.0, 4.0),
+        ("u2", "C"): (7.0, 8.0),
     }
     for (patient_id, station_id), expected_interval in expected_travel.items():
         assert (
@@ -84,8 +79,6 @@ def test_t05_travel_time_is_not_queue_waiting_time():
             only(patient_id, "TRAVEL_END", station_id).sim_time,
         ) == expected_interval
 
-    # Queue entry occurs only after travel ends. In particular, u1 does NOT
-    # enter the B queue at t=4; u1 enters at t=5 and waits until t=7.
     expected_queues = {
         ("u1", "A"): (0.0, 0.0),
         ("u1", "B"): (5.0, 2.0),
@@ -108,8 +101,6 @@ def test_t05_travel_time_is_not_queue_waiting_time():
     assert only("u2", "DEPARTURE").sim_time == 13.0
     assert len([r for r in records if r.event_type == "DEPARTURE"]) == 2
 
-    # Calculate u1's cycle-time components from the corresponding event pairs;
-    # compare each to the hard-coded manual values, not to observed totals.
     u1_stations = ("A", "B")
     service_time = sum(
         only("u1", "SERVICE_END", station).sim_time

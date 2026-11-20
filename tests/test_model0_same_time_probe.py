@@ -1,11 +1,3 @@
-"""Probe: same-time requests at A must be ordered by patient_rank.
-
-Both scenarios use new, independent SimPy environments. The second scenario
-intentionally reverses process creation order to expose whether native Resource
-FCFS can enforce the rank contract. Do not sort the EventLog or weaken the
-assertions if the second scenario fails.
-"""
-
 import simpy
 
 from health_exam_mas.model0 import (
@@ -30,7 +22,6 @@ RELEVANT_EVENTS = {"QUEUE_ENTRY", "SERVICE_START", "SERVICE_END"}
 
 
 def _run_scenario(start_order: tuple[str, str], run_id: str):
-    """Build and exhaust one fully independent A-only simulation."""
     env = simpy.Environment()
     stations = {
         "A": StationAgent(env, "A", MODEL0_STATIONS["A"]),
@@ -44,7 +35,6 @@ def _run_scenario(start_order: tuple[str, str], run_id: str):
     assert stations["A"].resource.capacity == 1
     assert stations["A"].config.service_duration == 4.0
 
-    # Both processes start at t=0, in exactly the supplied order.
     for patient_id in start_order:
         env.process(patient_process(env, patients[patient_id], stations, event_log))
     env.run()
@@ -65,8 +55,6 @@ def _only(records, patient_id: str, event_type: str):
 
 
 def test_same_time_a_requests_follow_patient_rank_regardless_of_start_order():
-    # Run both scenarios BEFORE making contract assertions. Even if scenario 2
-    # fails, its unsorted raw events will already have been printed.
     scenarios = (
         ("scenario 1", ("u1", "u2")),
         ("scenario 2", ("u2", "u1")),
@@ -79,7 +67,7 @@ def test_same_time_a_requests_follow_patient_rank_regardless_of_start_order():
         )
         raw_events = [
             record
-            for record in event_log.records  # Original append order: no sorting
+            for record in event_log.records
             if record.station_id == "A"
             and record.event_type in RELEVANT_EVENTS
         ]
@@ -95,7 +83,6 @@ def test_same_time_a_requests_follow_patient_rank_regardless_of_start_order():
 
         outcomes.append((label, env, stations, event_log, patients, raw_events))
 
-    # Fixed, manually specified expectations for BOTH independent scenarios.
     expected_intervals = {
         "u1": (0.0, 4.0),
         "u2": (4.0, 8.0),

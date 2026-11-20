@@ -1,10 +1,3 @@
-
-"""T06: simultaneous completion, arrivals, and an existing FCFS queue.
-
-This test intentionally checks both the fixed hand-derived timeline and the
-original EventLog append order at t=4. No event log sorting is permitted.
-"""
-
 import simpy
 
 from health_exam_mas.model0 import (
@@ -51,7 +44,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
             )
         )
 
-    # Start u1 first. u3 is scheduled before u4.
     env.process(
         patient_process(env, patients["u1"], stations, event_log)
     )
@@ -61,7 +53,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
 
     env.run()
 
-    # Preserve the original append order.
     records = event_log.records
 
     def matching(
@@ -94,7 +85,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         )
         return found[0]
 
-    # Fixed manual expectations.
     expected_arrivals = {
         "u1": 0.0,
         "u2": 1.0,
@@ -123,14 +113,12 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         "u4": 20.0,
     }
 
-    # Check arrivals.
     for patient_id, arrival_time in expected_arrivals.items():
         assert only(
             patient_id,
             "ARRIVAL",
         ).sim_time == arrival_time
 
-    # Check all service intervals.
     for station_id, intervals in (
         ("A", expected_a_intervals),
         ("B", expected_b_intervals),
@@ -155,7 +143,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
             assert start.visit_id == end.visit_id
             assert start.sequence_id < end.sequence_id
 
-        # Service intervals must not overlap.
         ordered_intervals = [
             intervals[p]
             for p in ("u1", "u2", "u3", "u4")
@@ -174,7 +161,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
             )
         )
 
-    # Check A queue entry order.
     a_entries = [
         record
         for record in records
@@ -192,7 +178,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         ("u4", 4.0),
     ]
 
-    # Check A service start order.
     a_starts = [
         record
         for record in records
@@ -210,7 +195,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         ("u4", 12.0),
     ]
 
-    # u2 must not be overtaken by u3/u4.
     assert only(
         "u2",
         "QUEUE_ENTRY",
@@ -231,7 +215,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         "A",
     ).sequence_id
 
-    # Check waiting times at A.
     expected_a_waits = {
         "u1": 0.0,
         "u2": 3.0,
@@ -246,7 +229,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         assert start.sim_time - entry.sim_time == expected_wait
         assert entry.visit_id == start.visit_id
 
-    # Check zero waiting times at B.
     for patient_id, (start_time, _) in expected_b_intervals.items():
         entry = only(patient_id, "QUEUE_ENTRY", "B")
         start = only(patient_id, "SERVICE_START", "B")
@@ -254,7 +236,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         assert entry.sim_time == start_time
         assert start.sim_time - entry.sim_time == 0.0
 
-    # Check departure times.
     departures = [
         r for r in records
         if r.event_type == "DEPARTURE"
@@ -268,10 +249,8 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
             "DEPARTURE",
         ).sim_time == expected_time
 
-    # Check final simulation time.
     assert env.now == 20.0
 
-    # Check patient cleanup.
     for patient in patients.values():
         assert patient.state == PatientState.FINISHED
         assert patient.location == "B"
@@ -279,7 +258,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         assert patient.active_visit_id is None
         assert patient.active_station_id is None
 
-    # Check resource cleanup.
     assert set(stations) == {"A", "B", "C"}
 
     for station in stations.values():
@@ -287,7 +265,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         assert station.resource.users == []
         assert station.resource.queue == []
 
-    # Check log sequence and monotonic time.
     assert [
         r.sequence_id for r in records
     ] == list(range(1, len(records) + 1))
@@ -297,8 +274,7 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         for a, b in zip(records, records[1:])
     )
 
-    # Strict t=4 event-order assertion.
-    # Do not sort the raw log.
+    # Compare emitted order so simultaneous-event discrepancies stay visible.
     expected_t4_order = [
         ("u1", "SERVICE_END", "A"),
         ("u1", "RESOURCE_RELEASE", "A"),
@@ -322,7 +298,6 @@ def test_t06_simultaneous_completion_arrivals_and_waiting_queue():
         ) in wanted
     ]
 
-    # Preserve complete original t=4 log for diagnosis.
     raw_t4_log = "\n".join(
         f"seq={r.sequence_id} "
         f"t={r.sim_time:g} "

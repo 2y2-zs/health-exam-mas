@@ -16,14 +16,12 @@ class PatientState(str, Enum):
 
 @dataclass(frozen=True)
 class EventRecord:
-    # Required fields
     sim_time: float
     sequence_id: int
     event_type: str
     patient_id: str
     run_id: str
 
-    # Optional fields
     prior_state: PatientState | None = None
     new_state: PatientState | None = None
     station_id: str | None = None
@@ -64,17 +62,14 @@ P1_CONFIG = PackageConfig(
 ENTRY_LOCATION = "ENTRY"
 
 MODEL0_TRAVEL_TIMES: dict[tuple[str, str], float] = {
-    # Entry to stations
     (ENTRY_LOCATION, "A"): 0.0,
     (ENTRY_LOCATION, "B"): 0.0,
     (ENTRY_LOCATION, "C"): 0.0,
 
-    # Same-station travel
     ("A", "A"): 0.0,
     ("B", "B"): 0.0,
     ("C", "C"): 0.0,
 
-    # Inter-station travel
     ("A", "B"): 1.0,
     ("B", "A"): 1.0,
     ("B", "C"): 1.0,
@@ -133,7 +128,7 @@ def recommend_fixed_route(
             "but required tests are not all completed."
         )
 
-    # Eligibility is independent of the fixed-route policy.
+    # The fixed route must still satisfy the package's hard predecessors.
     eligible = eligible_stations(package, completed_tests)
     if next_station not in eligible:
         raise ValueError(
@@ -163,7 +158,6 @@ class StationAgent:
         event_log: "EventLog",
         visit_id: str,
     ):
-        # Validate before changing visit ownership.
         if patient.location != self.station_id:
             raise ValueError(
                 f"Patient {patient.patient_id!r} is at "
@@ -208,7 +202,6 @@ class StationAgent:
             resource_token_or_server_id=resource_token,
         )
 
-        # The context manager owns resource release.
         with self.resource.request() as request:
             yield request
 
@@ -238,7 +231,7 @@ class StationAgent:
 
             patient.completed_tests.add(self.station_id)
 
-        # No yield separates completion, release and state commit.
+        # Commit patient progress before another process can observe the release.
         patient.active_visit_id = None
         patient.active_station_id = None
 
@@ -296,7 +289,6 @@ class EventLog:
             phase=phase,
         )
 
-        # Preserve raw event order.
         self.records.append(event)
         self._next_sequence_id += 1
         return event
@@ -316,7 +308,6 @@ def transition_patient_state(
     resource_token_or_server_id: str | None = None,
     phase: int | None = None,
 ) -> EventRecord:
-    # Record the transition without yielding.
     prior_state = patient.state
     patient.state = new_state
     event = event_log.record(
@@ -342,7 +333,6 @@ def travel_to_station(
     station_id: str,
     event_log: EventLog,
 ):
-    # Reject illegal destinations before changing state.
     if station_id not in MODEL0_STATIONS:
         raise ValueError(f"Unknown station: {station_id!r}")
 
@@ -365,11 +355,10 @@ def travel_to_station(
         station_id=station_id,
     )
 
-    # Zero travel still yields in this native-process baseline.
+    # A zero-duration trip still yields to other native SimPy events.
     yield env.timeout(travel_duration)
     patient.location = station_id
 
-    # Queue entry commits WAITING after travel completion.
     event_log.record(
         sim_time=env.now,
         event_type="TRAVEL_END",
@@ -423,7 +412,6 @@ def patient_process(
                 "No station was recommended for an unfinished patient."
             )
 
-        # B0 follows the legal recommendation.
         chosen_station = recommended_station
 
         event_log.record(
