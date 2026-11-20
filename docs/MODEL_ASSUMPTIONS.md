@@ -1,9 +1,9 @@
-# Model Assumptions & Evidence Register v1.2
+# Model Assumptions & Evidence Register v1.3
 
 **Project:** PSP305 — Multi-Agent Simulation and Comparative Evaluation of Queue Scheduling Policies for Daily Health Examination Centres
 
 **Status:** Working design and evidence register. See [project progress](../PROJECT_PROGRESS.md) for implementation and verification evidence.  
-**Updated:** 2026-11-10
+**Updated:** 2026-11-20
 
 ## 1. Purpose and evidence labels
 
@@ -18,7 +18,7 @@ Evidence types:
 - **ASSUMPTION — Uncalibrated experimental parameter:** use only with sensitivity tests or subsequent calibration.
 - **TO-CONFIRM — Operational rule or source detail not yet independently verified.**
 
-**Evidence status:** `identified` = relevant publication known; `needs-primary-check` = exact item/table/formulation should be verified from full original source; `needs-hospital-check` = requires partner process/data; `verified-in-code` and `validated-empirically` must only be used after student-led work actually establishes them. Current verification evidence is recorded in the [project progress report](../PROJECT_PROGRESS.md).
+**Evidence status.** `identified` records a relevant source. `needs-primary-check` and `needs-hospital-check` identify missing source or local evidence. `source-checked` applies to a specific passage, table or public page. A development check records a software result for one implementation and commit. `verified-in-code` requires student-led verification. `validated-empirically` requires comparison with relevant observations. Record these statuses separately for each claim.
 
 ## 2. Core research and modelling decisions
 
@@ -34,27 +34,67 @@ Evidence types:
 
 ## 3. Model 0: synthetic software-verification fixture
 
-**Every item in this section is SYNTHETIC; none is a medical-centre observation or clinical recommendation.**
+Model 0 uses synthetic patients, stations and times so that a reader can derive a complete day by hand. The rules below apply to Model 0. Each row gives the rule, its purpose or source, the limit of that evidence, a check, and what remains open. Case links lead to development assertions. The [verification plan](VERIFICATION_PLAN.md) gives the expected traces and invariants I1–I9. The [development record](../PROJECT_PROGRESS.md#recorded-development-checks) and the student's pending Gate 1 acceptance are tracked separately.
 
-| ID | Parameter / rule | Proposed fixture | Why it is used | Design status |
-|---|---|---|---|---|
-| M0-01 | Stations | A, B, C | Small independently checkable environment | Design-only |
-| M0-02 | Capacities | A=1, B=1, C=2 | Test single/multi-server constraints | Design-only |
-| M0-03 | Service times | A=4, B=3, C=5 minutes, deterministic | Hand-computable event traces | Design-only |
-| M0-04 | Packages | P1={A,B}, P2={B,C}, P3={A,B,C} | Exercise heterogeneous job sets | Design-only |
-| M0-05 | Fixed-route baseline | P1: A->B; P2: B->C; P3: A->B->C | Initial routing-policy fixture; **not** a clinical hard constraint or a queue-policy baseline | Design agreed in §9 |
-| M0-06 | Precedence example | A must finish before C may begin for P3 | Test legality independently of routing policy; fictitious | T04 negative/positive semantics specified in §9 |
-| M0-07 | Travel times | A<->B=1; B<->C=1; A<->C=2 minutes; entry->first=0 | Verify travel events and time accounting | Design-only |
-| M0-08 | Queue discipline | Shared FCFS queue; non-preemptive service | Minimal resource model | Design-only |
-| M0-09 | Patient behaviour | B0 full recommendation compliance | Isolate event and capacity correctness | Design-only |
-| M0-10 | Arrivals | Explicit deterministic times | Independent manual expected outcomes | Candidate test schedules/traces documented; student must independently recalculate (§9) |
-| M0-11 | Same-time event ordering, cutoff boundary | Provisional: completions/releases ahead of new admission/queue actions; admit at time <= cutoff | Make expected traces reproducible | **TO-CONFIRM** implementation feasibility and precise priorities in SimPy |
+### Patients, routes and time inputs
 
-**Test-design clarification (specified in §9):** Three arrivals at the centre do not necessarily imply three simultaneous arrivals at C when every route goes through B. Resource test T03 uses three simultaneous *eligible service requests at C* in a station-level fixture. T04 includes rejection of an illegal next exam and a positive legality check; simply following the fixed order is insufficient. The student must independently derive expected event times.
+| ID | Rule | Basis and purpose | Scope of evidence | Check | Follow-up |
+|---|---|---|---|---|---|
+| M0-01 | The full fixture has stations A, B and C. | SYNTHETIC. Three locations allow alternate routes and shared bottlenecks. | Smaller harnesses isolate individual mechanisms. | [T01], [T03], [T08] | Identify actual stations for Model 1. |
+| M0-02 | A and B each have one server. C has two interchangeable servers. | SYNTHETIC. Three requests at C exercise both parallel service and a wait. | T03 sends all three directly to C with test-only C packages. Arrivals through B would reach C at different times. | [T03], I1 | Check staffed capacity by time of day in Model 1. |
+| M0-03 | Service lasts exactly 4, 3 and 5 minutes at A, B and C respectively. | SYNTHETIC. These values make service, travel and waits independently calculable. | Numerical verification fixture only. | [T01], [T03], [T05] | Obtain measured service intervals for Model 1. |
+| M0-04 | P1 requires {A,B}, P2 {B,C} and P3 {A,B,C}. Each patient maintains their own required and completed sets. | SYNTHETIC. Different sets exercise patient heterogeneity and competing demand. | The item sets carry no clinical meaning. | [T05], [T07], I3 | Map real package items to Model 1 stations. |
+| M0-05 | Fixed routing chooses the first unfinished station on P1 A→B, P2 B→C or P3 A→B→C. | DESIGN + SYNTHETIC. A predictable next destination isolates station scheduling. | Uses the patient's package and completed exams. Queue length and future service information play no part in this decision. | [T01], [T05], [T07] | Keep the flow rule common in initial queue-policy comparisons. |
+| M0-06 | Only P3 has a hard predecessor, A before C. An unfinished exam is eligible when all its predecessors are complete. Check each recommendation before travel. | SYNTHETIC. With P3, B is eligible at entry and both B and C are eligible after A. | The test-only A→C→B route is legal. Recommending C first is an error with no C visit. | [T04 negative], [T04 positive], I4 | Source each proposed real precedence separately. |
+| M0-07 | Travel takes 1 minute A↔B and B↔C, 2 minutes A↔C, and 0 from entry to the first station or within a station. Routing and B0 decisions take 0 minutes. | SYNTHETIC + DESIGN. This separates walking, waiting and service in a hand trace. | No server or queue place is reserved during travel. | [T01], [T04 positive], [T05], I5 | Identify travel start/end and any remote queue registration in Model 1. |
+| M0-09 | B0 accepts every legal recommendation. The patient progresses through ARRIVED, NEEDS_ROUTING, DECIDING, TRAVELLING, WAITING and IN_SERVICE, then needs routing again or becomes FINISHED. | DESIGN. State and chosen/recommended station can be checked at each interaction. | B0 removes behavioural variation during verification. B1/B2 remain hypotheses (§5). | [T01], [T04 negative], [T07], I2–I4 | Check chosen equals recommended on the student's traces. |
+| M0-10 | Each test specifies arrival times and patient identities. Registration requires a unique patient ID and a finite nonnegative time at or after the current clock time. | SYNTHETIC + DESIGN. Hand-specified demand permits independent replay. An invalid time must leave the ID available. | A valid time after cutoff still schedules an admission attempt. The fixture supplies no arrival-rate estimate. | [Arrival guards], [duplicate ID], [past time], [T09] | Source daily arrivals separately for Model 1. |
 
-### Fixed route vs precedence
+### Station queue and service
 
-A routing policy chooses *which* eligible exam to visit next; a precedence graph defines which exams are *allowed*. Queue scheduling separately selects *which waiting patient* is served next at a station. Never silently equate an A->B->C fixed-route policy with medical precedence A->B->C. In Model 0 the only example hard constraint is A-before-C for P3, unless a test explicitly sets a different synthetic graph.
+| ID | Rule | Basis and purpose | Scope of evidence | Check | Follow-up |
+|---|---|---|---|---|---|
+| M0-08 | Each station selects the earliest queued patient (FCFS). Routing selects a destination separately. | L-MECHANISM + DESIGN. Chen et al. explicitly model FIFO in screening waiting areas. [Simulation assumptions, item 2][Chen] | Precedent for the baseline in a high-end screening model. Local priority and appointment exceptions remain unknown. | [T02], [T06], I6 | Confirm who can be called ahead at one Model 1 station. |
+| M0-08a | A patient obtains a place at the destination when travel ends and the station commits QUEUE_ENTRY at that timestamp. Station wait = SERVICE_START time minus QUEUE_ENTRY time, including zero. | DESIGN. Keeps time spent moving separate from time eligible to be served. | In T05, A releases at 4, B queue entry is at 5 and B service starts at 7. B waiting time is 2 minutes. | [T01], [T05], I5 | Establish the event that actually grants queue position (§7). |
+| M0-08b | Merge all new entries for a station at the current time. Order ties by stable patient rank. People already waiting keep their places. | DESIGN. Equal-time ordering makes a hand trace reproducible across registration orders and arrival sources. | Rank is synthetic. The coordinator uses patient ID as a final fallback for equal ranks. The cited scenarios use distinct ranks. | [T02], [T06], [mixed B], I6 | Ask about queue sequence and timestamp precision before selecting a Model 1 tie rule. |
+| M0-08c | Each station has one unbounded waiting queue shared by its servers. Patients in service are excluded. Dispatch immediately while an eligible patient and an idle server are available. | DESIGN. Waiting and busy counts can be reconciled independently. | Assumes identical servers at a station, continuous availability and no waiting-space limit. | [T03], [T08], I1/I6 | Check actual queues, staffing and dedicated resources. |
+| M0-08d | Service is non-preemptive and occupies `[start,end)`. Capacity released at t can serve another patient at t. | DESIGN. Adjacent service intervals do not double-count the server. | Model 0 omits breaks, failures, setup/cleaning, cross-station staffing and overtime limits. | [T03], [T08], I1/I5 | Check which omissions affect resource availability in Model 1. |
+| M0-08e | The Station Agent owns the waiting visit, capacity grant and release. Each (patient, station, visit) can enter, start, end and release once. At most one visit per patient is active. | DESIGN. A second scheduler or a stale release could grant one server twice or reorder patients. | The coordinated station selects from its own waiting list, then requests idle SimPy capacity. Its native Resource waiting queue should remain empty. | [Station implementation], [duplicate entry], [T08], I2/I8 | Check queue ownership and stale releases at Gate 1. |
+
+### Simultaneous events, closure and trace checks
+
+| ID | Rule | Basis and purpose | Scope of evidence | Check | Follow-up |
+|---|---|---|---|---|---|
+| M0-11 | At each timestamp process (0) service ends, (1) releases and progress updates, (2) admissions, (3) travel and routing, (4) queue entries, then (5) service starts. | DESIGN. Patients can act on released capacity and committed state. [SimPy scheduling] explains why same-time engine events still run sequentially. | The six phases are a project convention. The coordinated path implements them. A global coordinator is an implementation choice. | [T06], [T10], I9 | Compare the actual raw trace with the independent timeline. |
+| M0-11a | In phase 3 finish due positive-time travel, handle new admissions' entry routes and zero-time travel, record final departures, then start continuing patients' onward travel. Use stable rank within each group. | DESIGN. A journey already underway and a new entry can reach the same station together. Grouping preserves their causal history. | At B at t=5 the sample travel completions are u2 then u1. Phase 4 commits stations A/B/C in order and applies M0-08b at each station. B queues u1 then u2, who start at 5 and 8. | [mixed B], [T06], I6/I9 | Derive travel, queue and service orders separately at Gate 1. |
+| M0-11b | Admit arrivals at or before cutoff H. Record and reject later attempts. All admitted patients may finish after H. | DESIGN. Makes admission at the boundary and workload remaining after closure observable. | H=4 is specific to T09. Rejected attempts have no visits and are counted separately. | [T09], I7 | Obtain intake and end-of-service practice for Model 1. |
+| M0-11c | On release, record the completed exam, clear visit ownership and update the patient's state before the next decision. After the final release, log departure and allow no further requests. | DESIGN. A patient can continue only after the preceding visit is fully committed. | A final release sets FINISHED in phase 1. The departure record follows in phase 3 of that timestamp. | [T01], [T07], [T08], I2/I3/I8 | Reconcile each admitted patient's completed exams and departure. |
+| M0-11d | End a normal run when all attempts are processed, all admitted patients have departed and queues, travel and resources have drained. Report stalled work if the calendar is empty earlier. | DESIGN. Ensures admitted = active + finished and prevents premature termination. | T04's deliberately rejected recommendation is a negative test with no successful drain requirement. | [T09], [stalled run], I7 | Reconcile patient and resource counts at Gate 1. |
+| M0-12 | Use one time unit, unique managed station IDs, positive capacities and service times, and nonnegative travel times. Before running, check each registered route visits each required, managed station once and respects all in-package predecessors. | DESIGN. Preflight catches missing stations, repeats and cycles before the first admission. Runtime eligibility is checked separately (M0-06). | The linked negative cases exercise arrival/package and registry checks. An invalid package for a later arrival stops the run before the first admission. | [Package guards], [registry checks], [T04 negative], I3/I4 | Audit numerical station/travel configuration coverage separately from the package checks. |
+| M0-13 | Log committed events in order with time, sequence, phase or ordering marker, patient, station/visit, state change, recommendation/choice and ownership identifiers as applicable. Compare two fresh runs in original order. | DESIGN. An audit trace must distinguish “ended travel” from “joined queue” and expose same-time errors even when finish times agree. | Exclude run ID and wall-clock metadata from deterministic comparisons. T10 uses the T06 inputs. | [T10], [mixed B], I9 | Retain raw and normalized traces with the commit and environment. |
+
+[T01]: ../tests/test_model0_ab_coordinator.py#L5664
+[T02]: ../tests/test_model0_ab_coordinator.py#L6400
+[T03]: ../tests/test_model0_ab_coordinator.py#L6025
+[T04 negative]: ../tests/test_model0_ab_coordinator.py#L6122
+[T04 positive]: ../tests/test_model0_ab_coordinator.py#L6154
+[T05]: ../tests/test_model0_ab_coordinator.py#L6216
+[T06]: ../tests/test_model0_ab_coordinator.py#L5836
+[T07]: ../tests/test_model0_ab_coordinator.py#L5949
+[T08]: ../tests/test_model0_a_only_coordinator.py#L2728
+[T09]: ../tests/test_model0_ab_coordinator.py#L6320
+[T10]: ../tests/test_model0_ab_coordinator.py#L5915
+[mixed B]: ../tests/test_model0_coordinated_arrivals.py#L18
+[Arrival guards]: ../tests/test_model0_coordinated_arrivals.py#L47
+[Package guards]: ../tests/test_model0_coordinated_arrivals.py#L71
+[registry checks]: ../tests/test_model0_ab_coordinator.py#L149
+[duplicate ID]: ../tests/test_model0_ab_coordinator.py#L1845
+[past time]: ../tests/test_model0_ab_coordinator.py#L1942
+[duplicate entry]: ../tests/test_model0_ab_coordinator.py#L3828
+[stalled run]: ../tests/test_model0_ab_coordinator.py#L5741
+[Station implementation]: ../src/health_exam_mas/model0_station.py#L230
+[Chen]: https://link.springer.com/article/10.1186/s12913-021-06949-5
+[SimPy scheduling]: https://simpy.readthedocs.io/en/stable/topical_guides/time_and_scheduling.html
 
 ## 4. Model 1: candidate examination-centre configuration
 
@@ -62,9 +102,9 @@ These are **candidate** inputs, not yet a validated day-to-day centre dataset.
 
 | ID | Parameter | Candidate setting | Type / original context | Verification need |
 |---|---|---|---|---|
-| M1-01 | Six examination stations | Ultrasound (US), ECG, blood draw, internal medicine, X-ray, ophthalmology | L-DATA + DESIGN; subset selected from Lv et al. 2026 centralized case | Confirm exact case tables and nomenclature |
-| M1-02 | Parallel capacities in that case | US=4, ECG=2, Blood=3, Internal=1, X-ray=1, Ophthalmology=1 | L-DATA **reported in prior research notes**, not independently re-transcribed for this register | Cross-check original Table 12; do not generalize to all centres |
-| M1-03 | Mean exam time, minutes, case-specific | US male 7.32 / female 11.37; ECG 3.00; Blood 0.80; Internal 1.25; X-ray 1.00; Ophthalmology 1.30 | L-DATA **reported in prior research notes**; published means ≠ distributions | Cross-check units, population and original Table 12 |
+| M1-01 | Six examination stations | Ultrasound (US), ECG, blood draw, internal medicine, X-ray, ophthalmology | L-DATA + DESIGN; subset selected from Lv et al. 2026 centralized case | Table 12 station labels checked on 2026-11-20. Confirm target-centre scope. |
+| M1-02 | Rooms/devices reported in the batch case | US=4, ECG=2, Blood=3, Internal=1, X-ray=1, Ophthalmology=1 | L-DATA, source-checked against Lv et al. Table 12 on 2026-11-20 | Confirm simultaneous staffing before treating rooms/devices as operational capacity. |
+| M1-03 | Mean exam time, minutes, case-specific | US male 7.32 / female 11.37; ECG 3.00; Blood 0.80; Internal 1.25; X-ray 1.00; Ophthalmology 1.30 | L-DATA, source-checked against Lv et al. §6.2 and Table 12 on 2026-11-20. Means from small field samples (5–6 examinees per item). | Check transfer to the daily setting. Variability needs separate evidence. |
 | M1-04 | Directed inter-item travel-time matrix | Candidate six-station submatrix of Lv et al. 2026 case | L-DATA + DESIGN; asymmetric values possible | Verify original Table 11 and extraction before storing numbers in configuration |
 | M1-05 | Earlier synthetic P1/P2/P3 package candidates; sourced packages may replace them after checking | P1=Blood+ECG+Internal+Ophthalmology; P2=P1+X-ray; P3=P2+Ultrasound remain unconfirmed examples | ASSUMPTION; checked literature or authentic hospital-published lists may provide L-DATA / H-PUBLIC item inputs | Record source, item-to-station mapping, omissions/aggregation and assumptions; package proportions, arrivals and service durations require separate evidence |
 | M1-06 | Clinical precedence | No assumed clinical order by default; configurable verified constraints | TO-CONFIRM | Obtain medically/operationally grounded rules; do not infer from test fixture |
@@ -107,12 +147,15 @@ RQ2 concerns service order within station queues. Fixed route, shortest observed
 
 ## 7. Priority evidence gaps and mitigation
 
-1. **Operational validity:** obtain sample day arrivals, service durations, package proportions, resource counts and station locations if supervisor's hospital collaboration permits. Record confidentiality and data constraints.
-2. **Behavioural validity:** inspect Li et al. 2025 full study carefully for what exactly is switched, when, and what predictors are measured; do not equate queue abandonment with pre-queue override.
-3. **Primary source transcription:** verify every capacity, mean and matrix entry against original Lv 2026 tables before using Model 1 as literature-grounded numerical configuration.
-4. **Verification traceability:** Model 0 v1.1 policy/constraint separation, T03/T04 and cutoff semantics are design specified in §9. Confirm the still-open event/resource implementation approach, then independently recalculate expected traces and record actual tests.
-5. **Algorithm fairness:** verify sources and decision objects for queue-policy candidates; predefine shared flow, observable state, any behavioural assumptions, independent random streams, metric windows and statistical uncertainty before RQ2.
-6. **Package provenance:** checked literature packages and hospital-published lists are acceptable. Record source/URL, table/page or access date, original items, model-station mapping and assumptions. Such lists do not establish arrivals, package proportions, demographics, clinical order or service durations.
+Start with these three questions for one named daily centre. Record the site, station or package, date/version and precise meaning of each timestamp or item. A source check applies only to the claim cited. Use approved, de-identified records if available.
+
+| Priority / related rules | Evidence available, checked 2026-11-20 | What to obtain for Model 1 | If local evidence is unavailable |
+|---|---|---|---|
+| 1. When does a patient obtain queue position? M0-08/08a/08b, M1-10 | Jiangmen Wuyi Hospital describes a doctor sending the patient to the next room through its calling system. The description leaves the exact queue-entry trigger and tie rule open. [Hospital workflow, “智能导检系统有什么用呢？”](https://www.51ht.com/ksjs/qt/tjk_13079/ksdt_13185/202209/t662465.html) | For one new arrival and one transfer at the same station, ask staff which event grants a place. Where permitted, match referral/push, physical check-in or scan, ticket sequence, call and service start. Record time precision, priority exceptions and what happens when a patient has yet to arrive. | Label entry on arrival as an assumption. If remote entry is plausible, assess its effect on queue order and measured waiting in a separate scenario. |
+| 2. Which exams does each package require? R06, M1-05/06 | The National Taiwan University Hospital Health Management Center lists the items in a dated women's basic package. Ho et al. relate their centre's sets to resources (Tables 2 and 13). [Hospital package list](https://hmc.ntuh.gov.tw/examination-items-and-pricing/0m246043633122453305) · [Ho et al.](https://doi.org/10.1186/s12913-021-07148-y) | Record a current target-centre list, inclusion/optional status, item-to-station mapping and omissions or grouping. Record service order constraints and package uptake from separate evidence. | Use a named published package as a scenario. Label local station mapping, assumed mix and any adaptations individually. |
+| 3. How long is a station occupied? M0-03/08d, M1-02/03/09 | Chen et al. describe room-entry/exit sensors and exclusions, and give fitted inputs in Table 4. Lv et al. §6.2 and Table 12 report mean exam durations and room/device counts in a batch setting. [Chen et al.][Chen] · [Lv et al.](https://doi.org/10.1002/hsr2.72912) | Obtain matched service start/end times by exam, time units, sample size and time of day. Ask whether preparation or cleaning holds the resource and which rooms are staffed. Check missing scans and distinguish time in the room from time receiving service. | Carry each published input with its original setting and measurement definition. If only means are available, label any variability scenario as assumed. Keep inputs from different centres identifiable. |
+
+Other evidence gaps remain open. Obtain arrival times and package frequencies to estimate daily demand. Check the original Table 11 travel entries before transcribing a station subset. Review Li et al. for observed queue switching before specifying B1/B2, and check each candidate RQ2 policy's decision object, permitted observations, tie rule and fairness measures. The [verification plan](VERIFICATION_PLAN.md) covers independent derivation and testing of the Model 0 rules.
 
 ## 8. Reference register
 
@@ -130,35 +173,33 @@ This is not a verified catalogue of Queue Scheduling Policies. Retain routing, b
 
 ## 9. Model 0 v1.1 decisions and evidence status (2026-11-05)
 
-This section supersedes any earlier v1.0 phrasing on Model 0 policy, precedence and test semantics. For full rules see [MODEL_SPEC.md](MODEL_SPEC.md); for test inputs/expected traces see [VERIFICATION_PLAN.md](VERIFICATION_PLAN.md).
+Use the original decision IDs below to find each rule in the [Model 0 register](#3-model-0-synthetic-software-verification-fixture). The [specification](MODEL_SPEC.md) defines the contract. The [verification plan](VERIFICATION_PLAN.md) supplies the inputs and expected traces.
 
-| ID | Updated statement | Evidence class | Status / caveat |
-|---|---|---|---|
-| V11-01 | Fixed Route is a **replaceable routing policy** and not a clinical precedence graph. P1 A→B, P2 B→C, P3 A→B→C are default synthetic policy routes. | SYNTHETIC + DESIGN | **Design agreed**; implement/test separately from eligibility |
-| V11-02 | Hard precedence for P3 is only **A-before-C**. Initially eligible {A,B}; after A eligible {B,C}; A→C→B is legal. | SYNTHETIC | **Design agreed**; T04 includes both negative and positive checks |
-| V11-03 | Three simultaneous requests to capacity-2 C require C-only **test fixture** (T03), not three ordinary P2 arrivals upstream of B. | SYNTHETIC | **Design agreed**; avoids invalid test setup |
-| V11-04 | Stable patient rank, shared FCFS queue excluding patients in service, homogeneous servers, unlimited waiting space, non-preemptive service. | DESIGN engineering simplification | Needs actual implementation verification |
-| V11-05 | Service intervals are half-open [start,end), zero-time routing/decisions, no resource reservations while travelling. | DESIGN engineering simplification | Needs actual implementation verification |
-| V11-06 | Completion → release/commit → admission → travel/routing intents → queue entries → dispatch proposed for same-time event processing. | DESIGN event semantics | **Proposed domain contract; exact SimPy mechanism still TO-CONFIRM** |
-| V11-07 | Native SimPy queue scheduling cannot simply be assumed to enforce all domain phases; full global six-phase coordinator is **optional**, not a compulsory development milestone. | DESIGN implementation choice | Review native process-based and minimal coordination approaches; verify T06 event trace, not just finish times |
-| V11-08 | Admission attempts exactly at time H accepted; later attempts rejected, previously admitted patients continue to completion. | DESIGN synthetic cutoff convention | Test T09; do not use `env.run(until=H)` to truncate the day |
-| V11-09 | One Station Agent owns each visit's queue/token/release; deny duplicate queue entry, completion and release. | DESIGN engineering invariant | Implement and independently test before claiming correctness |
-| V11-10 | T01–T10 have independently checkable **candidate handwritten expected traces**. | SYNTHETIC verification oracle | Student must recalculate expected traces and record actual results for Gate 1 |
-| V11-11 | The SimPy version and resource/dispatch approach for the formal Model 0 entry point require confirmation. | TO-CONFIRM | Record the version and approach used for Gate 1 verification |
-
-**Source audit clarification:** `L-DATA` and `H-PUBLIC` identify source types, not a source-checked status. Use a separate proposed `source-checked` status only after actually examining the original full text/table or hospital page. `verified-in-code` and `validated-empirically` are separate claims and require separate evidence.
+| v1.1 ID | Decision | Current rule or record |
+|---|---|---|
+| V11-01 | Replaceable fixed route | M0-04/05 |
+| V11-02 | Independent hard precedence and legal alternatives | M0-06, M0-12 |
+| V11-03 | C-only competition fixture | M0-02, [T03] |
+| V11-04 | Shared queue, stable rank, homogeneous servers and non-preemption | M0-02, M0-08 through M0-08d |
+| V11-05 | Zero-time decisions, travel without reservation and half-open service intervals | M0-07, M0-08a/08d |
+| V11-06 | Same-time domain event order | M0-11/11a/11c, M0-13 |
+| V11-07 | Choice of SimPy coordination mechanism | M0-08e, M0-11 and [development record](../PROJECT_PROGRESS.md#recorded-development-checks) |
+| V11-08 | Inclusive admission cutoff and drain | M0-10, M0-11b/11d |
+| V11-09 | Visit ownership and release authority | M0-08e, M0-11c |
+| V11-10 | Independent manual expectations for T01–T10 | M0-13 and [required student evidence](VERIFICATION_PLAN.md#3-evidence-required-for-each-student-run-test) |
+| V11-11 | Record SimPy version and resource/dispatch approach for formal acceptance | M0-08e and [implementation gate](#implementation-gate) |
 
 - **Munavalli et al. 2020:** multi-agent healthcare coordination is supported; our agent decomposition and active autonomous examinees are project choices, not direct observations from that work.
 - **Ying & Kittipittayakorn 2018:** examination-centre DES + agent-based modelling has precedent; that does not establish that the paper used our Python/SimPy architecture.
 - **Li et al. 2025:** examinee deviations/queue-switching requests motivate investigation, but exact physical/virtual queue-entry and queue-exit timing is **needs-primary-check**. Our **pre-queue override** and B1/B2 rules are distinct unvalidated candidates.
 - **Ho et al. 2021:** multiple examination sets support modelling heterogeneous required tests, but not the specific synthetic P1–P3 definitions.
-- **Lv et al. 2026:** original centralized-batch numeric case is not evidence for daily Poisson arrivals, Gamma service durations, candidate demand rates or assumed patient demographics. Recheck original tables before numerical use.
+- **Lv et al. 2026:** original centralized-batch numeric case is not evidence for daily Poisson arrivals, Gamma service durations, candidate demand rates or assumed patient demographics. Table 12's six candidate rows have been checked for the batch case. The candidate Table 11 travel entries still need transcription checks.
 
 ### Implementation gate
 
-Model 0 v1.1 has a prototype on the development branch. Gate 1 remains open. Finalizing an event-handling approach, keeping state and resource ownership coherent, validating negative-case semantics, pinning the SimPy version and deriving expected traces independently are prerequisites to closing it. See [project progress](../PROJECT_PROGRESS.md) for the current evidence.
+The development record at `5abfe6e` reports 11 coordinated checks covering T01–T10, including both T04 cases and the single-station T08 harness. The full suite recorded 160 passes and two native-path failures (same-time patient order and the T06 raw log). It records SimPy 4.1.2. Gate 1 remains open pending student verification of the chosen entry point. Record the actual environment, commit, independent expectations and raw traces together. [Development checks](../PROJECT_PROGRESS.md#recorded-development-checks) · [Phase ordering and input checks](../PROJECT_PROGRESS.md#phase-ordering-and-input-checks)
 
-**Queue ownership design risk (not an observed runtime failure):** if a Station Agent's custom waiting list selects service order while native SimPy Resource requests also wait internally, two orderings may conflict. Choose a coherent owner of service selection and verify the custom-queue/resource interaction, capacity and FCFS traces. A full six-phase coordinator remains optional; no implementation approach is established by this warning.
+Two service-selection queues can disagree about who gets a server. M0-08e documents how the coordinated path avoids this risk and how the student can check capacity and release ownership.
 
 ### Research direction update (2026-11-10)
 
@@ -168,4 +209,4 @@ The working title and RQ2 now concern **Queue Scheduling Policies** (who is serv
 
 For each changed setting, record: **ID -> prior value -> new value -> supporting evidence or experiment purpose -> impact on agents/routes/tests -> verification or validation status**. Keep this document aligned with `MODEL_SPEC.md` and `VERIFICATION_PLAN.md`.
 
-**Current outcome:** a documented set of assumptions and open verification tasks; no software tests or empirical validations have been completed by producing this file.
+For a new rule, record the model and ID, the executable rule, its source or design purpose, the claim that evidence supports, a verification case or operational record, and the remaining question. Date any source check and link execution evidence to its commit.
