@@ -1,6 +1,6 @@
 # Research context (working v1.1)
 
-Updated: 2026-11-10. Research direction revised; no implementation, executed tests or experimental results are established by this update.
+Updated: 2026-11-24. Literature positioning and methods reviewed; this documentation update establishes no new implementation, test passes or experimental results.
 
 ## Working title
 
@@ -24,21 +24,35 @@ After Model 0 verification, a verified Model 1 with common flow and B0 full rout
 
 Candidate operational outcomes include waiting time, equipment/resource utilization, completed examinations/patients, clearance time and fairness. Exact metric definitions, policy candidates and experiments are not frozen. Policy performance, rankings and behavioural effects are research questions, not predetermined conclusions.
 
+Full-text review now identifies direct station-service-selection sources: Lin et al. (2017), §2.3 D3 and §3.4, and Chen et al. (2024), §2.2–2.3 and §5.1. SPT, LST and SERPT are **candidates only**, not selected algorithms. SPT concerns the current station's expected service demand; LST concerns time since centre arrival; SERPT concerns the expected processing demand of all unfinished examinations. Precise estimates, ties and any adaptation from the original frameworks remain pending. See [the literature library](LITERATURE_LIBRARY.md).
+
+## Modelling and evaluation methods
+
+- [ODD — Grimm et al. (2020)](https://doi.org/10.18564/jasss.4259), §1.4, §2.3 and Table 2: describe entities, state, information available to agents, decisions, interactions, process order, inputs and purpose-specific evaluation. This supports a clear account of our Patient Agent; it does not prove autonomy or require learning and complex behavioural rules.
+- [STRESS — Monks et al. (2019)](https://doi.org/10.1080/17477778.2018.1442155), Table 4 and §5.4–5.6: report DES/ABS logic, input provenance, initialization, run boundaries, random sampling/streams, independent replications and uncertainty. Reporting completeness does not itself establish validity or prescribe a fixed replication count or warm-up.
+- [Collins, Koehler & Lynch (2024)](https://doi.org/10.18564/jasss.5258), §2.3 and §4.29–4.32: distinguish **Verification** against a specification from **Validation** for an intended use, use suitable complementary evidence and recheck changed models. Model 0's synthetic traces belong primarily to Verification; empirical or expert checks must be reported as pending until performed.
+
+These are method references, not sources for our A/B/C numbers, six-phase event order, Poisson/Gamma assumptions or B1/B2 probabilities. If Model 1 combines inputs from several settings, identify each adaptation and describe the result as a literature-informed scenario rather than a reconstruction of one observed hospital.
+
 ## Packages and evidence
 
 Examination packages may be drawn from checked primary literature or authentic hospital-published package lists. Record the original source/URL, relevant table/page or access date, package items, their mapping to model stations, and any omissions, aggregation or assumptions. A package list alone does not establish arrival patterns, package proportions, patient demographics, clinical precedence or service durations. Synthetic Model 0 packages remain software-verification inputs.
 
-## Literature to consult (verify details before citation)
+## Literature and source status
+
+The [literature library](LITERATURE_LIBRARY.md) records full titles, decision objects, reading boundaries and source locations. Important full-text findings are: Chiu & Yeh (2010) selects the next examination room (Routing); Jain et al. (2022) and Zuo et al. (2024) use joint decisions rather than a queue-only intervention; Li et al. (2025) studies switching **after automatic queue assignment**, not our pre-queue B1/B2 rules. Lv et al. (2026) remains a batch-case input reference with transcription limitations. P01 and P12 still lack full text; P01 acquisition is deferred.
 
 - Chern, Chien & Chen (2008), A Heuristic Algorithm for the Hospital Health Examination Scheduling Problem. https://doi.org/10.1016/j.ejor.2007.02.029
 - Chiu & Yeh (2010), Fuzzy-Based Dynamic Scheduling System for Health Examination. https://doi.org/10.1109/ICMLC.2010.5580551
 - Jain et al. (2022), Improving Patient Satisfaction and Outpatient Diagnostic Center Efficiency Using Novel Online Real-Time Scheduling. https://doi.org/10.1016/j.orhc.2022.100338
 - Munavalli et al. (2020), An Intelligent Real-Time Scheduler for Out-Patient Clinics: A Multi-Agent System Model. https://doi.org/10.1177/1460458220905380
 - Kittipittayakorn & Ying (2016), Using the Integration of Discrete Event and Agent-Based Simulation to Enhance Outpatient Service Quality in an Orthopedic Department. https://doi.org/10.1155/2016/4189206
-- Ying & Kittipittayakorn (2018), Combining discrete event and agent-based simulation for reducing draftees waiting time in physical examination centers. https://ntut.elsevierpure.com/en/publications/combining-discrete-event-and-agent-based-simulation-for-reducing-/
+- Ying & Kittipittayakorn (2018), Combining discrete event and agent-based simulation for reducing draftees waiting time in physical examination centers. https://doi.org/10.23055/ijietap.2018.25.2.3458 — metadata/abstract only; full text not acquired.
 - Li et al. (2025), When Do People Switch Queues? An Empirical Study of Discretionary Queue Switching at a Physical Examination Center. https://doi.org/10.1111/deci.12646
 - Lv et al. (2026), Optimization of Batch Centralized Health Examination Scheduling Considering Inter-Item Transition Time and Sex Differences. https://doi.org/10.1002/hsr2.72912
 - Ho et al. (2021), Overbooking for Physical Examination Considering Late Cancellation and Set-Resource Relationship. https://doi.org/10.1186/s12913-021-07148-y
+- Lin, Ling & Yeung (2017), Resource Allocation and Outpatient Appointment Scheduling Using Simulation Optimization. https://doi.org/10.1155/2017/9034737 — includes station service selection, alongside resource/appointment decisions.
+- Chen et al. (2024), Frontiers in Operations: Waiting Experience in Open-Shop Service Networks: Improvements via Flow Analytics and Automation. https://doi.org/10.1287/msom.2022.0590 — Priority versus Routing; LST/SERPT candidates and conditional analytical cases.
 
 **Literature caution:** ABM in physical examinations, online scheduling, and patient deviation behaviour already exist individually. The proposed integration/gap is a hypothesis to assess by critical comparison, not a claim of being first. Batch-examination parameters cannot simply be treated as observations of ongoing daily arrivals.
 

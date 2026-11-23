@@ -29,7 +29,9 @@ Later packages may use checked literature or authentic hospital public package i
 
 ## Development status
 
-`main` holds the design baseline. The [Model 0 development branch](https://github.com/2y2-zs/health-exam-mas/tree/model0/development-checkpoint) contains the simulation code, coordinated prototypes and deterministic tests. The formal Model 0 entry point and its acceptance checks are pending. See [Project progress](PROJECT_PROGRESS.md) for the scope of the prototype checks and the remaining failures.
+Reviewed on **2026-11-24**. `main` holds the research-documentation baseline. The [remote development branch](https://github.com/2y2-zs/health-exam-mas/tree/model0/development-checkpoint) and the newer local development checkout must be distinguished; their implementation and evidence are recorded separately in [Project progress](PROJECT_PROGRESS.md).
+
+Historical checks reported **146 passed / 2 failed**. A later local archive records **154 coordinated passes** and **160 passed / 2 failed** overall at code revision `fd71ade`. These are development records, not a new run or completed independent acceptance. **Model 0 Gate 1 remains open**, and both native-path same-time ordering problems remain unresolved. Model 1, Model 2 and RQ2 research experiments have not been executed. This documentation update does not merge simulation code or synchronize the local development checkout.
 
 ## Academic integrity
 
