@@ -182,6 +182,12 @@ class AOnlyCoordinatedStation:
                 raise RuntimeError("Visit was not active at release")
             visit_ids.add(visit.visit_id)
 
+        for visit in due:
+            if visit.ends_at != self.env.now:
+                raise RuntimeError("Service is not due for release")
+            if not visit.completion_recorded:
+                raise RuntimeError("Service completion was not recorded")
+
         released: list[PatientAgent] = []
         for visit in due:
             patient = visit.patient
