@@ -25,6 +25,7 @@ class ActiveVisit:
     visit_id: str
     request: object
     ends_at: float
+    completion_recorded: bool = False
 
 
 class AOnlyCoordinatedStation:
@@ -143,6 +144,9 @@ class AOnlyCoordinatedStation:
             ),
         )
 
+        if any(visit.completion_recorded for visit in due):
+            raise RuntimeError("Service completion already recorded")
+
         for visit in due:
             patient = visit.patient
 
@@ -160,6 +164,7 @@ class AOnlyCoordinatedStation:
                 ),
                 phase=0,
             )
+            visit.completion_recorded = True
 
         return due
 
