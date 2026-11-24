@@ -21,6 +21,13 @@ from health_exam_mas.model0_coordinator import (
 from health_exam_mas.model0_station import AOnlyCoordinatedStation
 
 
+def _print_event_log(log: EventLog) -> None:
+    print(f"\n=== {log.run_id} RAW EVENT LOG (APPEND ORDER) ===")
+    for record in log.records:
+        print(repr(record))
+    print(f"=== END {log.run_id} RAW EVENT LOG ===")
+
+
 A_ONLY = PackageConfig(
     required_tests=frozenset({"A"}),
     fixed_route=("A",),
@@ -5623,6 +5630,8 @@ def test_run_coordinated_t07_p3_departs_after_c_release():
     run = env.process(coordinator.run())
     env.run()
 
+    _print_event_log(log)
+
     assert run.triggered
     assert env.now == 14.0
     assert all(record.patient_id == "u1" for record in log.records)
@@ -5697,6 +5706,8 @@ def test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter():
 
     run = env.process(coordinator.run())
     env.run()
+
+    _print_event_log(log)
 
     assert run.triggered
     assert env.now == 10.0
@@ -5787,6 +5798,8 @@ def test_run_coordinated_t04_rejects_illegal_recommendation(monkeypatch):
     with pytest.raises(ValueError, match=r"Entry route destination 'C' is not eligible"):
         env.run()
 
+    _print_event_log(log)
+
     assert env.now == 0.0
     assert [
         (record.sim_time, record.phase, record.patient_id, record.event_type)
@@ -5813,6 +5826,8 @@ def test_run_coordinated_t04_allows_alternative_route_a_c_b():
 
     run = env.process(coordinator.run())
     env.run()
+
+    _print_event_log(log)
 
     timeline_events = {
         "ARRIVAL", "TRAVEL_START", "TRAVEL_END", "QUEUE_ENTRY", "SERVICE_START",
@@ -5885,6 +5900,8 @@ def test_run_coordinated_t05_counts_travel_separately_from_waiting():
 
     run = env.process(coordinator.run())
     env.run()
+
+    _print_event_log(log)
 
     assert [
         (record.patient_id, record.sim_time)
@@ -5991,6 +6008,8 @@ def test_run_coordinated_t09_accepts_at_cutoff_and_drains():
     ] == [(2, "u3", "ARRIVAL_REJECTED", None)]
 
     env.run()
+
+    _print_event_log(log)
     assert run.triggered
     assert env.now == 15.0
     assert [
