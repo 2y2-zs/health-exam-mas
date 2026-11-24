@@ -73,26 +73,26 @@ Model 0 uses synthetic patients, stations and times so that a reader can derive 
 | M0-12 | Use one time unit, unique managed station IDs, positive capacities and service times, and nonnegative travel times. Before running, check each registered route visits each required, managed station once and respects all in-package predecessors. | DESIGN. Preflight catches missing stations, repeats and cycles before the first admission. Runtime eligibility is checked separately (M0-06). | The linked negative cases exercise arrival/package and registry checks. An invalid package for a later arrival stops the run before the first admission. | [Package guards], [registry checks], [T04 negative], I3/I4 | Audit numerical station/travel configuration coverage separately from the package checks. |
 | M0-13 | Log committed events in order with time, sequence, phase or ordering marker, patient, station/visit, state change, recommendation/choice and ownership identifiers as applicable. Compare two fresh runs in original order. | DESIGN. An audit trace must distinguish “ended travel” from “joined queue” and expose same-time errors even when finish times agree. | Exclude run ID and wall-clock metadata from deterministic comparisons. T10 uses the T06 inputs. | [T10], [mixed B], I9 | Retain raw and normalized traces with the commit and environment. |
 
-[T01]: ../tests/test_model0_ab_coordinator.py#L5328
-[T02]: ../tests/test_model0_ab_coordinator.py#L6048
-[T03]: ../tests/test_model0_ab_coordinator.py#L5681
-[T04 negative]: ../tests/test_model0_ab_coordinator.py#L5776
-[T04 positive]: ../tests/test_model0_ab_coordinator.py#L5807
-[T05]: ../tests/test_model0_ab_coordinator.py#L5868
-[T06]: ../tests/test_model0_ab_coordinator.py#L5497
-[T07]: ../tests/test_model0_ab_coordinator.py#L5607
-[T08]: ../tests/test_model0_a_only_coordinator.py#L2557
-[T09]: ../tests/test_model0_ab_coordinator.py#L5971
-[T10]: ../tests/test_model0_ab_coordinator.py#L5574
+[T01]: ../tests/test_model0_entry_acceptance.py#L20
+[T02]: ../tests/test_model0_entry_acceptance.py#L204
+[T03]: ../tests/test_model0_ab_coordinator.py#L5690
+[T04 negative]: ../tests/test_model0_ab_coordinator.py#L5787
+[T04 positive]: ../tests/test_model0_ab_coordinator.py#L5820
+[T05]: ../tests/test_model0_ab_coordinator.py#L5883
+[T06]: ../tests/test_model0_entry_acceptance.py#L621
+[T07]: ../tests/test_model0_ab_coordinator.py#L5614
+[T08]: ../tests/test_model0_entry_acceptance.py#L894
+[T09]: ../tests/test_model0_ab_coordinator.py#L5988
+[T10]: ../tests/test_model0_entry_acceptance.py#L954
 [mixed B]: ../tests/test_model0_coordinated_arrivals.py#L16
 [Arrival guards]: ../tests/test_model0_coordinated_arrivals.py#L45
 [Package guards]: ../tests/test_model0_coordinated_arrivals.py#L69
-[registry checks]: ../tests/test_model0_ab_coordinator.py#L142
-[duplicate ID]: ../tests/test_model0_ab_coordinator.py#L1802
-[past time]: ../tests/test_model0_ab_coordinator.py#L1897
-[duplicate entry]: ../tests/test_model0_ab_coordinator.py#L3633
-[stalled run]: ../tests/test_model0_ab_coordinator.py#L5403
-[Station implementation]: ../src/health_exam_mas/model0_station.py#L220
+[registry checks]: ../tests/test_model0_ab_coordinator.py#L149
+[duplicate ID]: ../tests/test_model0_ab_coordinator.py#L1809
+[past time]: ../tests/test_model0_ab_coordinator.py#L1904
+[duplicate entry]: ../tests/test_model0_ab_coordinator.py#L3640
+[stalled run]: ../tests/test_model0_ab_coordinator.py#L5410
+[Station implementation]: ../src/health_exam_mas/model0_station.py#L231
 [Chen]: https://link.springer.com/article/10.1186/s12913-021-06949-5
 [SimPy scheduling]: https://simpy.readthedocs.io/en/stable/topical_guides/time_and_scheduling.html
 

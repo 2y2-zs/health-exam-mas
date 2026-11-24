@@ -1,0 +1,290 @@
+{
+  "date": "2026-11-24",
+  "timezone": "Asia/Shanghai",
+  "branch": "model0/development-checkpoint",
+  "code_commit": "10ac83310db02563947f836bf5406455a15fc60f",
+  "operator": "assistant-supported development checks",
+  "gate_1": "open; independent student acceptance not performed by this run",
+  "working_directory": "<repo>",
+  "selected_nodes": [
+    "tests/test_model0_entry_acceptance.py::test_t01_single_p1_abc_formal_entry_finishes_at_t8",
+    "tests/test_model0_entry_acceptance.py::test_t02_two_p1_same_time_arrivals_fcfs",
+    "tests/test_model0_ab_coordinator.py::test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter",
+    "tests/test_model0_ab_coordinator.py::test_run_coordinated_t04_rejects_illegal_recommendation",
+    "tests/test_model0_ab_coordinator.py::test_run_coordinated_t04_allows_alternative_route_a_c_b",
+    "tests/test_model0_ab_coordinator.py::test_run_coordinated_t05_counts_travel_separately_from_waiting",
+    "tests/test_model0_entry_acceptance.py::test_t06_abc_same_time_completion_arrivals_and_waiter",
+    "tests/test_model0_ab_coordinator.py::test_run_coordinated_t07_p3_departs_after_c_release",
+    "tests/test_model0_entry_acceptance.py::test_t08_abc_release_serves_the_existing_waiter",
+    "tests/test_model0_entry_acceptance.py::test_t08_stale_release_preserves_the_current_owner",
+    "tests/test_model0_ab_coordinator.py::test_run_coordinated_t09_accepts_at_cutoff_and_drains",
+    "tests/test_model0_entry_acceptance.py::test_t10_abc_reproduces_raw_trace_across_fresh_runs"
+  ],
+  "runs": {
+    "entry": {
+      "command": [
+        "<repo>\\.venv\\Scripts\\python.exe",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=short",
+        "-p",
+        "no:cacheprovider",
+        "-o",
+        "pythonpath=<repo>/src",
+        "-o",
+        "junit_logging=all",
+        "-o",
+        "junit_log_passing_tests=true",
+        "--junitxml=<evidence-output>/entry-results.xml",
+        "tests/test_model0_entry_acceptance.py::test_t01_single_p1_abc_formal_entry_finishes_at_t8",
+        "tests/test_model0_entry_acceptance.py::test_t02_two_p1_same_time_arrivals_fcfs",
+        "tests/test_model0_ab_coordinator.py::test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter",
+        "tests/test_model0_ab_coordinator.py::test_run_coordinated_t04_rejects_illegal_recommendation",
+        "tests/test_model0_ab_coordinator.py::test_run_coordinated_t04_allows_alternative_route_a_c_b",
+        "tests/test_model0_ab_coordinator.py::test_run_coordinated_t05_counts_travel_separately_from_waiting",
+        "tests/test_model0_entry_acceptance.py::test_t06_abc_same_time_completion_arrivals_and_waiter",
+        "tests/test_model0_ab_coordinator.py::test_run_coordinated_t07_p3_departs_after_c_release",
+        "tests/test_model0_entry_acceptance.py::test_t08_abc_release_serves_the_existing_waiter",
+        "tests/test_model0_entry_acceptance.py::test_t08_stale_release_preserves_the_current_owner",
+        "tests/test_model0_ab_coordinator.py::test_run_coordinated_t09_accepts_at_cutoff_and_drains",
+        "tests/test_model0_entry_acceptance.py::test_t10_abc_reproduces_raw_trace_across_fresh_runs"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "total": 13,
+        "passed": 13,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "failed_tests": [],
+      "local_junit_xml_sha256": "08aabb67720bf417fea6d2d83bd40aaa4ddb20f1b9738f435a009cf3d0614609"
+    },
+    "full": {
+      "command": [
+        "<repo>\\.venv\\Scripts\\python.exe",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=short",
+        "-p",
+        "no:cacheprovider",
+        "-o",
+        "pythonpath=<repo>/src",
+        "-o",
+        "junit_logging=all",
+        "-o",
+        "junit_log_passing_tests=true",
+        "--junitxml=<evidence-output>/full-results.xml",
+        "tests"
+      ],
+      "exit_code": 1,
+      "counts": {
+        "total": 180,
+        "passed": 178,
+        "failed": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "failed_tests": [
+        "test_same_time_a_requests_follow_patient_rank_regardless_of_start_order",
+        "test_t06_simultaneous_completion_arrivals_and_waiting_queue"
+      ],
+      "local_junit_xml_sha256": "79c784cad3cf8a53a97cab0f6ebd297a342d1b7292a49612c9c85348bbc8b88f"
+    }
+  },
+  "environment": {
+    "python": "3.12.10",
+    "simpy": "4.1.2",
+    "pytest": "9.2.0",
+    "executable": "<repo>\\.venv\\Scripts\\python.exe"
+  },
+  "entry_case_logs": [
+    {
+      "name": "test_t01_single_p1_abc_formal_entry_finishes_at_t8",
+      "class": "tests.test_model0_entry_acceptance",
+      "event_rows": 19
+    },
+    {
+      "name": "test_t02_two_p1_same_time_arrivals_fcfs[forward_registration]",
+      "class": "tests.test_model0_entry_acceptance",
+      "event_rows": 38
+    },
+    {
+      "name": "test_t02_two_p1_same_time_arrivals_fcfs[reverse_registration]",
+      "class": "tests.test_model0_entry_acceptance",
+      "event_rows": 38
+    },
+    {
+      "name": "test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter",
+      "class": "tests.test_model0_ab_coordinator",
+      "event_rows": 33
+    },
+    {
+      "name": "test_run_coordinated_t04_rejects_illegal_recommendation",
+      "class": "tests.test_model0_ab_coordinator",
+      "event_rows": 1
+    },
+    {
+      "name": "test_run_coordinated_t04_allows_alternative_route_a_c_b",
+      "class": "tests.test_model0_ab_coordinator",
+      "event_rows": 27
+    },
+    {
+      "name": "test_run_coordinated_t05_counts_travel_separately_from_waiting",
+      "class": "tests.test_model0_ab_coordinator",
+      "event_rows": 38
+    },
+    {
+      "name": "test_t06_abc_same_time_completion_arrivals_and_waiter",
+      "class": "tests.test_model0_entry_acceptance",
+      "event_rows": 76
+    },
+    {
+      "name": "test_run_coordinated_t07_p3_departs_after_c_release",
+      "class": "tests.test_model0_ab_coordinator",
+      "event_rows": 27
+    },
+    {
+      "name": "test_t08_abc_release_serves_the_existing_waiter",
+      "class": "tests.test_model0_entry_acceptance",
+      "event_rows": 22
+    },
+    {
+      "name": "test_t08_stale_release_preserves_the_current_owner",
+      "class": "tests.test_model0_entry_acceptance",
+      "event_rows": 22
+    },
+    {
+      "name": "test_run_coordinated_t09_accepts_at_cutoff_and_drains",
+      "class": "tests.test_model0_ab_coordinator",
+      "event_rows": 39
+    },
+    {
+      "name": "test_t10_abc_reproduces_raw_trace_across_fresh_runs",
+      "class": "tests.test_model0_entry_acceptance",
+      "event_rows": 152
+    }
+  ],
+  "raw_event_rows": 532,
+  "raw_log_count": 14,
+  "entry_trace_lf_sha256": "e10dc74e784f9f16431059d6843fb65997ee853630c6c96193d5832bf641c76e",
+  "working_tree_file_sha256": {
+    "src/health_exam_mas/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/health_exam_mas/model0.py": "a40f0b783afc2e56c39f7fd6579001df6a76dcb90a6d45b572d5a6dda60bb5bb",
+    "src/health_exam_mas/model0_coordinator.py": "76627014569e1b6d34078ba4325b5c953b1a5c21706d6e1dabc784c5e124b2ba",
+    "src/health_exam_mas/model0_station.py": "150356a2971b47bea35e1a9a3b14301ea236243777a67a1f52ab1db8de6db486",
+    "tests/model0_a_only_prototype.py": "a42b8a4d38000274950dbb0b0012b294e2b6dfcaa695a9363d901f5c9fc65524",
+    "tests/model0_acceptance_nodes.txt": "51e59583357e6f0703e08570afddd686b6c7131bd859370e506e3d23755433e4",
+    "tests/test_model0_a_only_coordinator.py": "5d6bd3303e58501110b14b194220934bee4a785f06d22390f963b483b1f25579",
+    "tests/test_model0_ab_coordinator.py": "c0a7ee70427dd32b5647b743a6389e8158cc809bc5e86259f6e201c421398084",
+    "tests/test_model0_coordinated_arrivals.py": "85f5d927e3ce63fcd86895c48302817414aa1e65ae8a20697c74da31a0934553",
+    "tests/test_model0_entry_acceptance.py": "1f0eb133f8b9423575598d90fcfe2f92a34cf651c20ec9a98ec772d81d961163",
+    "tests/test_model0_same_time_probe.py": "abd3cb9e8444cb7235d34e57d6b83145725579cf4c2a352b52b0cf804fb731ce",
+    "tests/test_model0_station_completion.py": "92d027035d659450f90adc0ff6c0e7f659d91df34214a2ce59a53170d76136ca",
+    "tests/test_model0_station_release.py": "5c0a1e8b3ee9c61e3aad9d338b3c7140a37b2889ba3ab89c1372026d282c2ff0",
+    "tests/test_model0_t01.py": "a9495a4e975b185b01630a5e4d763cbb2ba0b88cd43c19982079cc813de03095",
+    "tests/test_model0_t02.py": "6cee489fcd043ff3c2950d98b54287da1b2f34b237d2ba4f9136d401eb40ca19",
+    "tests/test_model0_t03.py": "1f74f569f022b9ebece0a5ad958ef542fa3b591b6e153a60c5aa6462aa365b60",
+    "tests/test_model0_t04.py": "c9bdb9911e350a1dc88ea778424ea776787d760b1b9d926db5170771011f252d",
+    "tests/test_model0_t05.py": "78f2e4afa043119b32cb1c6e00a3529e2c44b50d9fc013e6e0b1df91b6013c64",
+    "tests/test_model0_t06.py": "fe3465e1acb6832cd3b782d3f06838fbd30b88fe1bc92376a1ddea98be8626cd"
+  },
+  "archived_console_lf_sha256": "1f0e0b6024f8bad83b7a6bfa69c2e163050d9c20c26d084f348ce75b135f7ba3",
+  "archive_notes": "Paths use <repo> and <evidence-output> placeholders. Original JUnit reports are retained locally. Event lines are unchanged. Archived text uses LF and omits trailing blank space.",
+  "historical_comparison": {
+    "reference": "model0-fd71ade-events.csv",
+    "normalization": "Exclude run ID and case labels. Compare equivalent numeric/time and enum representations in append order.",
+    "logs_matched": 14,
+    "event_rows_matched": 532,
+    "comparisons": [
+      {
+        "new_run_id": "ENTRY_T01",
+        "historical_case": "T01_ABC",
+        "rows": 19,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ENTRY_T02",
+        "historical_case": "T02_ABC",
+        "rows": 38,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ENTRY_T02",
+        "historical_case": "T02_ABC",
+        "rows": 38,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ABC_T03",
+        "historical_case": "T03",
+        "rows": 33,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ABC_T04",
+        "historical_case": "T04_negative",
+        "rows": 1,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ABC_T04",
+        "historical_case": "T04_positive",
+        "rows": 27,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ABC_T05",
+        "historical_case": "T05",
+        "rows": 38,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ENTRY_T06",
+        "historical_case": "T06_ABC_FIRST",
+        "rows": 76,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ABC_T07",
+        "historical_case": "T07",
+        "rows": 27,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ENTRY_T08",
+        "historical_case": "T08_ABC",
+        "rows": 22,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ENTRY_T08_STALE",
+        "historical_case": "T08_ABC",
+        "rows": 22,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ABC_T09",
+        "historical_case": "T09",
+        "rows": 39,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ENTRY_T10_FIRST",
+        "historical_case": "T06_ABC_FIRST",
+        "rows": 76,
+        "match_in_append_order": true
+      },
+      {
+        "new_run_id": "ENTRY_T10_SECOND",
+        "historical_case": "T06_ABC_SECOND",
+        "rows": 76,
+        "match_in_append_order": true
+      }
+    ]
+  }
+}

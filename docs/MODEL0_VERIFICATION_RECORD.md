@@ -1,5 +1,41 @@
 # Model 0 development verification
 
+## Latest development checkpoint — 2026-11-24
+
+- **Code/test revision:** `10ac83310db02563947f836bf5406455a15fc60f`, local `model0/development-checkpoint`.
+- **Formal entry:** packaged `MultiStationCoordinator.run()` with A/B/C, registered case arrivals, `env.process(coordinator.run())`, then `env.run()` to drain (except the expected T04 negative).
+- **Environment:** Python 3.12.10, SimPy 4.1.2, pytest 9.2.0.
+- **Operator/status:** assistant-supported development checks. **Gate 1 remains open for independent student acceptance.** No Model 1/2 or RQ2 experiment was run.
+
+| Check at this revision | Actual result |
+|---|---|
+| [Fixed T01–T10 selection](../tests/model0_acceptance_nodes.txt) | 13 passed, exit 0: 12 formal-entry end-to-end checks plus the T08 stale-release component negative. |
+| Full `tests/` suite | 178 passed, 2 failed, exit 1; no skips or collection errors. Both failures are the unchanged native diagnostics listed below. |
+| Raw selected output | 14 original logs, 532 EventRecords. T10 contributes two runs; the T04 negative contributes only ARRIVAL. Records remain in append order. |
+
+Evidence retained for this exact code/test revision:
+
+- [Version, environment, commands with portable path placeholders, results, per-case counts and source/test SHA-256 hashes](evidence/model0-20261124-checks.json).
+- [Original selected EventRecord output](evidence/model0-20261124-entry-events.txt), including phases, sequence IDs, state transitions and ownership identifiers.
+- [Full-suite console with local output path replaced and both failure explanations preserved](evidence/model0-20261124-full-console.txt).
+
+All 532 records matched the corresponding [2026-11-20 archived traces](evidence/model0-fd71ade-events.csv) field by field in append order after excluding run IDs and normalizing representations. This checks for behavioural changes across revisions. The student still derives the expected traces independently.
+
+The selected cases preserve the expected traces in [the verification plan](VERIFICATION_PLAN.md#2-test-cases-t01t10). T02 runs forward/reverse registration orders; T03 uses three C-only patients at C; T04 separately checks an illegal runtime recommendation and legal A→C→B; T08 separates normal flow from stale-release misuse. These are synthetic software checks, not hospital observations or empirical validation.
+
+### Guard and entry preparation history
+
+| Revision | Work and evidence status |
+|---|---|
+| `c1363aa` | Added the packaged A/B/C entry file. The student reported 7 passed in 0.18s; the complete student console was not supplied. This report is separate from the assistant reruns above. |
+| `487d3b0` | Added a completion-recorded flag and whole-batch duplicate-completion guard. New regressions changed from 3 failed / 1 passed to 4 passed. Full suite: 171 passed / 2 native failures. |
+| `74a1cba` | Added due-now/completed-before-release guards, preserving the prior whole-batch identity checks. New release regressions changed from 5 failed / 2 passed to 7 passed; the completion/release files together had 11 passes. Full suite: 178 passed / 2 native failures. |
+| `10ac833` | Added the explicit entry selection and raw output in six existing ABC scenarios. Original test logic and assertions were unchanged by an AST comparison. The results and raw output above were then captured at this committed revision. |
+
+The guard regressions are development component evidence; the student's Gate 1 record still needs independent expectations, actual execution and a review decision. The raw logs cannot by themselves prove unlogged internal state. Existing drain/ownership assertions and the component checks remain part of the review.
+
+## Historical checkpoint — 2026-11-20
+
 - **Run date** 2026-11-20
 - **Code revision** `fd71adee7c583677dfdf1f7e47283d249e8ddb3f`
 - **Environment** Python 3.12.10, SimPy 4.1.2, pytest 9.2.0
@@ -8,7 +44,7 @@ The coordinated suites passed all **154** checks, including **11 cases for T01�
 
 ## Entry point and execution
 
-The candidate packaged entry point is `MultiStationCoordinator.run()`. Create one SimPy environment, configure A/B/C, register the case's arrivals, start the coordinator with `env.process(coordinator.run())`, and drain with `env.run()`. The existing tests for T01, T02, T06 and T10 configure A/B. T08 uses a standalone A station. Direct A/B/C runs covered these five cases, with C idle and only A requested in T08. Their ordered records matched the original test records after removing `run_id`. [Model specification](MODEL_SPEC.md)
+At this historical checkpoint, the candidate packaged entry point was `MultiStationCoordinator.run()`. Create one SimPy environment, configure A/B/C, register the case's arrivals, start the coordinator with `env.process(coordinator.run())`, and drain with `env.run()`. The existing tests for T01, T02, T06 and T10 configure A/B. T08 uses a standalone A station. Direct A/B/C runs covered these five cases, with C idle and only A requested in T08. Their ordered records matched the original test records after removing `run_id`. [Model specification](MODEL_SPEC.md)
 
 From the repository root, the full-suite command uses the same options as the recorded run.
 
@@ -45,7 +81,7 @@ The archive has 861 event rows from 21 logs, including the mixed-B regression, b
 | Same-time ordering at A | u1 starts first in either process creation order. | With the processes created u2 then u1, service also started u2 then u1. |
 | T06 at t=4 | u1's SERVICE_END and RESOURCE_RELEASE precede admissions u3 and u4. | The native log recorded both admissions before SERVICE_END and RESOURCE_RELEASE. Departure times still matched. |
 
-The recommended formal entry point is the coordinated path. If the native path remains a supported way to run Model 0, both failures need a scheduling fix. If it serves only as a historical prototype, record that scope explicitly so future models and experiments use the coordinated path. The original failure assertions remain visible in the full suite. [Same-time probe](../tests/test_model0_same_time_probe.py#L57) · [Native T06 assertion](../tests/test_model0_t06.py#L311)
+The selected formal entry point is now the packaged coordinated path. Native execution remains a historical comparison prototype; it is not an alternative formal Model 0 runner. Its known failures violate the unchanged contract and are not accepted behaviour of the formal entry. The original failure assertions remain visible in the full suite. [Same-time probe](../tests/test_model0_same_time_probe.py#L57) · [Native T06 assertion](../tests/test_model0_t06.py#L311)
 
 ## Independent acceptance
 

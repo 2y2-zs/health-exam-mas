@@ -113,6 +113,51 @@ Use **separate fresh environments** for negative and positive subcases.
 
 Record the configuration, independent calculation, expected and actual ordered traces, assertions and execution result. Explain discrepancies and record expected rejections as negative test outcomes.
 
+### Fixed formal-entry selection
+
+Use [the node selection](../tests/model0_acceptance_nodes.txt) with the packaged A/B/C `MultiStationCoordinator.run()` entry. Existing smaller harnesses and native tests remain useful component/history checks. The selected tests retain the fixtures and expectations in §2; T03 and T08 use test-only C-only/A-only packages within the full station registry.
+
+| Scenario | Selected test location / check |
+|---|---|
+| T01 | `test_model0_entry_acceptance.py::test_t01_single_p1_abc_formal_entry_finishes_at_t8` |
+| T02 | `test_model0_entry_acceptance.py::test_t02_two_p1_same_time_arrivals_fcfs` (both registration orders) |
+| T03 | `test_model0_ab_coordinator.py::test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter` |
+| T04 negative / positive | `test_model0_ab_coordinator.py::test_run_coordinated_t04_rejects_illegal_recommendation` / `test_run_coordinated_t04_allows_alternative_route_a_c_b` |
+| T05 | `test_model0_ab_coordinator.py::test_run_coordinated_t05_counts_travel_separately_from_waiting` |
+| T06 | `test_model0_entry_acceptance.py::test_t06_abc_same_time_completion_arrivals_and_waiter` |
+| T07 | `test_model0_ab_coordinator.py::test_run_coordinated_t07_p3_departs_after_c_release` |
+| T08 end-to-end | `test_model0_entry_acceptance.py::test_t08_abc_release_serves_the_existing_waiter` |
+| T08 component negative | `test_model0_entry_acceptance.py::test_t08_stale_release_preserves_the_current_owner` |
+| T09 | `test_model0_ab_coordinator.py::test_run_coordinated_t09_accepts_at_cutoff_and_drains` |
+| T10 | `test_model0_entry_acceptance.py::test_t10_abc_reproduces_raw_trace_across_fresh_runs` |
+
+This is **12 end-to-end checks plus one component negative**, covering ten scenario definitions. T02 expands to two checks, T04 has two subcases, and T10 compares two fresh runs within one check. T04's expected recommendation rejection does not require a drained successful simulation.
+
+From the repository root in PowerShell:
+
+```powershell
+$evidenceDir = Join-Path $env:TEMP ('model0-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+New-Item -ItemType Directory -Path $evidenceDir | Out-Null
+$acceptanceNodes = Get-Content .\tests\model0_acceptance_nodes.txt
+.\.venv\Scripts\python.exe -B -m pytest -q -s -p no:cacheprovider -o pythonpath=src @acceptanceNodes 2>&1 | Tee-Object -FilePath (Join-Path $evidenceDir 'model0-entry-console.txt')
+$LASTEXITCODE | Set-Content (Join-Path $evidenceDir 'model0-entry-exit.txt')
+$evidenceDir
+```
+
+Retain the following with the student's run:
+
+- Full commit hash, branch, `git status --short`, Python/SimPy/pytest versions and interpreter path; identify any uncommitted changes.
+- Exact command, console output, exit code and selected node file. Do not infer a pass from a prior checkpoint.
+- Independently derived expectations from §2, then original append-order EventRecords with every field. Do not sort records; normalize only `run_id` and nondomain metadata for T10. Visit identity is `(patient_id, station_id, visit_id)`, not `visit_id` alone.
+- I1–I9 review: capacity/ownership, legal and unique completion, exact travel/service and waiting, FCFS ties, patient conservation, once-only visit events and causal/phase order. Trace checks and final-state assertions complement each other; neither alone proves every intermediate state.
+- Expected negative outcomes and any discrepancies, including the two known native failures; label component negatives separately from end-to-end runs. Record the student's review and Gate 1 decision explicitly.
+
+Run the full suite separately and retain its actual result. At code/test revision `10ac833`, assistant development checks were **13 passed** for the selection and **178 passed / 2 failed** for the full suite (exit 1, no skips/errors). These results do not close Gate 1. [Current development evidence](MODEL0_VERIFICATION_RECORD.md#latest-development-checkpoint--2026-11-24)
+
+### Station guard regressions
+
+[Completion checks](../tests/test_model0_station_completion.py) and [release checks](../tests/test_model0_station_release.py) are component regressions, outside the 13-check selection. `close_services()` refuses a repeated completion before mutating a due batch. `release_services()` preserves whole-batch duplicate/active-identity validation, then requires every visit to end at the current time with completion already recorded before any release. Early, missing-completion, late and mixed invalid batches must be refused without partial mutation. These guards enforce the existing phase 0/1 contract and I8; they do not define a new patient-flow rule.
+
 ## 4. SimPy-specific risks to verify
 
 - Check raw order at simultaneous completions, arrivals, queue entries and service starts.

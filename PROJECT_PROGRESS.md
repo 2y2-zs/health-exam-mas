@@ -1,6 +1,6 @@
 # Project progress
 
-Reviewed on 2026-11-20. [Design baseline on `main`](https://github.com/2y2-zs/health-exam-mas/tree/ee5753f195dc71aee7d468a5814d6457d967c699) · [Initial development checkpoint](https://github.com/2y2-zs/health-exam-mas/commit/ea7e73d32d8351f5e6c219d19680e4457182708b)
+Reviewed on 2026-11-24. The latest local development checks used code/test revision `10ac83310db02563947f836bf5406455a15fc60f`. [Design baseline on `main`](https://github.com/2y2-zs/health-exam-mas/tree/ee5753f195dc71aee7d468a5814d6457d967c699) · [Initial development checkpoint](https://github.com/2y2-zs/health-exam-mas/commit/ea7e73d32d8351f5e6c219d19680e4457182708b)
 
 ## Completed
 
@@ -18,8 +18,10 @@ Reviewed on 2026-11-20. [Design baseline on `main`](https://github.com/2y2-zs/he
 | Arrival validation and event ordering at `5abfe6e` | 160 passed, 2 failed. The 14 new regression cases passed. A later comment cleanup reproduced the full-suite totals and all 38 events in the B-station run. |
 | Single mixed-arrivals check at `b70b485` | Passed. [Configuration, assisted calculation and original log](docs/MODEL0_MIXED_B_TRACE.md) |
 | Model 0 verification at `fd71ade` | 154 coordinated checks passed, including the 11 cases for T01–T10. The full suite reported 160 passed and 2 native-path failures. [Run record and original traces](docs/MODEL0_VERIFICATION_RECORD.md) |
+| Completion and release guards at `487d3b0` / `74a1cba` | Added whole-batch duplicate-completion and release-prerequisite guards. The completion/release component files contain 11 passing checks; the release fix's full run reported 178 passed, 2 failed. |
+| Unified A/B/C entry evidence at `10ac833` (2026-11-24) | The explicit T01–T10 selection passed all 13 checks: 12 end-to-end checks and one T08 stale-release component check. Full suite: 178 passed, 2 failed, no skips/errors. Assistant-run development evidence, not independent acceptance. [Version, commands and original output](docs/MODEL0_VERIFICATION_RECORD.md#latest-development-checkpoint--2026-11-24) |
 
-The two open failures are on the native SimPy path. The coordinated path served u1 before u2 under both registration orders and matched the T06 raw order. The package-only T01 smoke check logged departure at t=8. [Simultaneous-request assertion](tests/test_model0_same_time_probe.py#L57) · [T06 raw order assertion](tests/test_model0_t06.py#L311)
+The two open failures remain on the historical native SimPy path; neither assertion has been removed, skipped or relaxed. The coordinated entry is the selected formal path. The coordinated path served u1 before u2 under both registration orders and matched the T06 raw order. The package-only T01 smoke check logged departure at t=8. [Simultaneous-request assertion](tests/test_model0_same_time_probe.py#L57) · [T06 raw order assertion](tests/test_model0_t06.py#L311)
 
 The checks used Python 3.12.10, SimPy 4.1.2 and pytest 9.2.0. Run from the repository root in PowerShell.
 
@@ -33,7 +35,7 @@ The checks used Python 3.12.10, SimPy 4.1.2 and pytest 9.2.0. Run from the repos
 
 | Work | Next evidence |
 | --- | --- |
-| Model 0 formal entry point and verification | Build one environment with A/B/C, register arrivals with `MultiStationCoordinator`, run and drain. Record independent traces for the same-time and input checks below. |
+| Model 0 Gate 1 independent acceptance | Reproduce the fixed selection through the packaged A/B/C `MultiStationCoordinator.run()` entry, compare independent expectations with raw ordered records, and record the student's acceptance decision. Entry migration and both station-guard fixes are implemented. [Selection and evidence checklist](docs/VERIFICATION_PLAN.md#3-evidence-required-for-each-student-run-test) |
 | Model 1 data source and scope | Confirm usable operational data with the supervisor. If access remains unresolved at the end of December, agree on the scope of a literature-based scenario. [Evidence priorities](docs/MODEL_ASSUMPTIONS.md#7-priority-evidence-gaps-and-mitigation) |
 | Interim Poster | Prepare reviewed evidence and the five-minute presentation. [Submission checklist](poster/README.md) · [Gantt chart](poster/gantt.md) |
 

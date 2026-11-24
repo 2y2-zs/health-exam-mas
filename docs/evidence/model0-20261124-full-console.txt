@@ -1,0 +1,64 @@
+........................................................................ [ 40%]
+........................................................................ [ 80%]
+.................F.................F                                     [100%]
+================================== FAILURES ===================================
+___ test_same_time_a_requests_follow_patient_rank_regardless_of_start_order ___
+tests\test_model0_same_time_probe.py:100: in test_same_time_a_requests_follow_patient_rank_regardless_of_start_order
+    assert actual_start_order == ["u1", "u2"], (
+E   AssertionError: scenario 2: same-time tie must follow patient_rank, not process creation order; actual=['u2', 'u1']
+E   assert ['u2', 'u1'] == ['u1', 'u2']
+E
+E     At index 0 diff: 'u2' != 'u1'
+E     Use -v to get more diff
+---------------------------- Captured stdout call -----------------------------
+
+scenario 1: process start order = u1 -> u2
+  seq=13 patient=u1 event=QUEUE_ENTRY time=0
+  seq=14 patient=u2 event=QUEUE_ENTRY time=0
+  seq=15 patient=u1 event=SERVICE_START time=0
+  seq=16 patient=u1 event=SERVICE_END time=4
+  seq=19 patient=u2 event=SERVICE_START time=4
+  seq=20 patient=u2 event=SERVICE_END time=8
+
+scenario 2: process start order = u2 -> u1
+  seq=13 patient=u2 event=QUEUE_ENTRY time=0
+  seq=14 patient=u1 event=QUEUE_ENTRY time=0
+  seq=15 patient=u2 event=SERVICE_START time=0
+  seq=16 patient=u2 event=SERVICE_END time=4
+  seq=19 patient=u1 event=SERVICE_START time=4
+  seq=20 patient=u1 event=SERVICE_END time=8
+_________ test_t06_simultaneous_completion_arrivals_and_waiting_queue _________
+tests\test_model0_t06.py:311: in test_t06_simultaneous_completion_arrivals_and_waiting_queue
+    assert actual_t4_order == expected_t4_order, (
+E   AssertionError: T06 t=4 raw event order differs from the documented order.
+E     Expected relevant order: [('u1', 'SERVICE_END', 'A'), ('u1', 'RESOURCE_RELEASE', 'A'), ('u3', 'ARRIVAL', None), ('u4', 'ARRIVAL', None), ('u3', 'QUEUE_ENTRY', 'A'), ('u4', 'QUEUE_ENTRY', 'A'), ('u2', 'SERVICE_START', 'A')]
+E     Actual relevant order: [('u3', 'ARRIVAL', None), ('u4', 'ARRIVAL', None), ('u1', 'SERVICE_END', 'A'), ('u1', 'RESOURCE_RELEASE', 'A'), ('u3', 'QUEUE_ENTRY', 'A'), ('u4', 'QUEUE_ENTRY', 'A'), ('u2', 'SERVICE_START', 'A')]
+E     Original unsorted t=4 log:
+E     seq=16 t=4 patient=u3 event=ARRIVAL station=None
+E     seq=17 t=4 patient=u3 event=NEEDS_ROUTING station=None
+E     seq=18 t=4 patient=u3 event=DECIDING station=None
+E     seq=19 t=4 patient=u3 event=ROUTE_DECISION station=None
+E     seq=20 t=4 patient=u3 event=TRAVEL_START station=A
+E     seq=21 t=4 patient=u4 event=ARRIVAL station=None
+E     seq=22 t=4 patient=u4 event=NEEDS_ROUTING station=None
+E     seq=23 t=4 patient=u4 event=DECIDING station=None
+E     seq=24 t=4 patient=u4 event=ROUTE_DECISION station=None
+E     seq=25 t=4 patient=u4 event=TRAVEL_START station=A
+E     seq=26 t=4 patient=u1 event=SERVICE_END station=A
+E     seq=27 t=4 patient=u1 event=RESOURCE_RELEASE station=A
+E     seq=28 t=4 patient=u3 event=TRAVEL_END station=A
+E     seq=29 t=4 patient=u4 event=TRAVEL_END station=A
+E     seq=30 t=4 patient=u1 event=DECIDING station=None
+E     seq=31 t=4 patient=u1 event=ROUTE_DECISION station=None
+E     seq=32 t=4 patient=u1 event=TRAVEL_START station=B
+E     seq=33 t=4 patient=u3 event=QUEUE_ENTRY station=A
+E     seq=34 t=4 patient=u4 event=QUEUE_ENTRY station=A
+E     seq=35 t=4 patient=u2 event=SERVICE_START station=A
+E   assert [('u3', 'ARRI...Y', 'A'), ...] == [('u1', 'SERV...Y', 'A'), ...]
+E
+E     At index 0 diff: ('u3', 'ARRIVAL', None) != ('u1', 'SERVICE_END', 'A')
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/test_model0_same_time_probe.py::test_same_time_a_requests_follow_patient_rank_regardless_of_start_order
+FAILED tests/test_model0_t06.py::test_t06_simultaneous_completion_arrivals_and_waiting_queue
+2 failed, 178 passed in 1.59s

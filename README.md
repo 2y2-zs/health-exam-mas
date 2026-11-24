@@ -21,7 +21,7 @@ This PSP305 project uses Python and SimPy to model daily health examination flow
 
 ## Development status
 
-The development branch contains the native and coordinated Model 0 paths. Independent acceptance is pending. [Development checks and open issues](PROJECT_PROGRESS.md#recorded-development-checks)
+The formal Model 0 entry on `model0/development-checkpoint` is the packaged `MultiStationCoordinator.run()` with A/B/C. The native path remains a historical comparison prototype with two visible failing diagnostics. The fixed T01–T10 check selection and raw development traces are recorded; independent Gate 1 acceptance remains pending. [Development checks and open issues](PROJECT_PROGRESS.md#recorded-development-checks)
 
 ## Academic integrity
 
