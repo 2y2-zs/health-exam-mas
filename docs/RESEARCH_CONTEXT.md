@@ -16,17 +16,14 @@ Research direction agreed on 2026-11-10. [Current implementation and test eviden
 
 ## Decision scope and proposed research mechanism
 
-Routing selects the next eligible examination station. Queue scheduling selects the next waiting patient for service. Initial RQ2 comparisons can use verified Model 1 with common flow, information access, resources and B0 full routing compliance. Model 2 examines optional pre-queue behaviour under B1/B2. [Model specification](MODEL_SPEC.md) · [Evaluation assumptions](MODEL_ASSUMPTIONS.md#6-evaluation-assumptions-rq2)
+After Model 0 acceptance, a verified Model 1 can support the first queue-policy comparison under common flow, information, resources and B0. Model 2 explores optional patient behaviour. [Model stages](MODEL_SPEC.md#6-model-1-and-model-2-deferred) · [RQ2 experiment assumptions and candidate outcomes](MODEL_ASSUMPTIONS.md#6-evaluation-assumptions-rq2)
 
-Candidate outcomes include waiting time, resource utilization, completed examinations or patients, clearance time and fairness. Exact metrics, comparison policies and experiment settings are pending.
+## Modelling and evaluation methods
 
-## Packages and evidence
+- Use ODD to describe entities, states, available information, decisions, interactions and process order. Use STRESS to report inputs, run boundaries, implementation and uncertainty. [P15–P16](LITERATURE_LIBRARY.md#c-模型描述报告与验证方法)
+- Verify the implementation against its specification and assess validity for its intended use with the available evidence. Model 0 synthetic traces support software verification. [P17](LITERATURE_LIBRARY.md#c-模型描述报告与验证方法) · [Acceptance plan](VERIFICATION_PLAN.md)
 
-Use checked primary literature or public hospital package lists and document the original items, station mapping and adaptations. Source operating inputs and precedence separately. [Model 1 evidence priorities](MODEL_ASSUMPTIONS.md#7-priority-evidence-gaps-and-mitigation)
-
-## Literature to consult (verify details before citation)
-
-Check prior work before making a novelty claim. The proposed combination of agent-based modelling, online scheduling and patient behaviour is a research direction to compare with existing studies. [Literature library](LITERATURE_LIBRARY.md)
+Compare the proposed integration with prior work before making a novelty claim. [Literature findings and candidate policies](LITERATURE_LIBRARY.md) · [Rule and input evidence](MODEL_ASSUMPTIONS.md)
 
 ## Schedule
 
@@ -35,7 +32,3 @@ Check prior work before making a novelty claim. The proposed combination of agen
 - Dissertation: 2027-05-09 23:59 (PSP305 Module Handbook, 2026/27, PDF p. 6).
 
 Internal milestones, including the target to send the Dissertation draft to the supervisor, are maintained in the [Gantt chart](../poster/gantt.md).
-
-## Academic integrity
-
-PSP305 requires the student to perform assessed implementation, technical analysis, evaluation and conclusions. AI may assist with learning, design discussion, code review and debugging explanations, but must not substitute for the student's assessed work. Do not mark any component verified or any experiment completed until the student has performed and recorded it.

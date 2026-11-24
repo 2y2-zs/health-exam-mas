@@ -3,9 +3,9 @@
 ## Latest development checkpoint — 2026-11-24
 
 - **Code/test revision:** `10ac83310db02563947f836bf5406455a15fc60f`, local `model0/development-checkpoint`.
-- **Formal entry:** packaged `MultiStationCoordinator.run()` with A/B/C, registered case arrivals, `env.process(coordinator.run())`, then `env.run()` to drain (except the expected T04 negative).
+- **Entry:** packaged A/B/C coordinator, using the [formal selection and procedure](VERIFICATION_PLAN.md#3-evidence-required-for-each-student-run-test).
 - **Environment:** Python 3.12.10, SimPy 4.1.2, pytest 9.2.0.
-- **Operator/status:** assistant-supported development checks. **Gate 1 remains open for independent student acceptance.** No Model 1/2 or RQ2 experiment was run.
+- **Operator:** assistant-supported development checks. [Gate 1 status](../PROJECT_PROGRESS.md#in-progress)
 
 | Check at this revision | Actual result |
 |---|---|
@@ -21,7 +21,7 @@ Evidence retained for this exact code/test revision:
 
 All 532 records matched the corresponding [2026-11-20 archived traces](evidence/model0-fd71ade-events.csv) field by field in append order after excluding run IDs and normalizing representations. This checks for behavioural changes across revisions. The student still derives the expected traces independently.
 
-The selected cases preserve the expected traces in [the verification plan](VERIFICATION_PLAN.md#2-test-cases-t01t10). T02 runs forward/reverse registration orders; T03 uses three C-only patients at C; T04 separately checks an illegal runtime recommendation and legal A→C→B; T08 separates normal flow from stale-release misuse. These are synthetic software checks, not hospital observations or empirical validation.
+These synthetic runs verify software behaviour against the [scenario expectations](VERIFICATION_PLAN.md#2-test-cases-t01t10).
 
 ### Guard and entry preparation history
 
@@ -32,7 +32,15 @@ The selected cases preserve the expected traces in [the verification plan](VERIF
 | `74a1cba` | Added due-now/completed-before-release guards, preserving the prior whole-batch identity checks. New release regressions changed from 5 failed / 2 passed to 7 passed; the completion/release files together had 11 passes. Full suite: 178 passed / 2 native failures. |
 | `10ac833` | Added the explicit entry selection and raw output in six existing ABC scenarios. Original test logic and assertions were unchanged by an AST comparison. The results and raw output above were then captured at this committed revision. |
 
-The guard regressions are development component evidence; the student's Gate 1 record still needs independent expectations, actual execution and a review decision. The raw logs cannot by themselves prove unlogged internal state. Existing drain/ownership assertions and the component checks remain part of the review.
+The component checks complement the raw records, which cover emitted events and leave some internal state unobserved.
+
+## Earlier package checks
+
+| Check | Recorded result |
+| --- | --- |
+| Package migration at `18855bf` | 146 passed, 2 failed, matching `ea7e73d`. The coordinated suites had 140 passes, including 11 checks covering T01–T10. T04 has two cases and T08 uses the single-station harness. |
+| Arrival validation and event ordering at `5abfe6e` | 160 passed, 2 failed. The 14 new regression cases passed. A later comment cleanup reproduced the full-suite totals and all 38 events in the B-station run. |
+| Mixed arrivals at B at `b70b485` | [Passed with an assisted calculation and original log](MODEL0_MIXED_B_TRACE.md). |
 
 ## Historical checkpoint — 2026-11-20
 
@@ -85,4 +93,4 @@ The selected formal entry point is now the packaged coordinated path. Native exe
 
 ## Independent acceptance
 
-The student should reproduce the checks on the recorded entry point, derive expected event orders independently, compare the raw records and record a decision for Gate 1. [Acceptance requirements](VERIFICATION_PLAN.md#3-evidence-required-for-each-student-run-test)
+[Acceptance requirements](VERIFICATION_PLAN.md#3-evidence-required-for-each-student-run-test)

@@ -1,4 +1,4 @@
-# Model 0 Verification Plan v1.1 — proposed hand-calculated test oracle
+# Model 0 Verification Plan v1.1
 
 Use this plan to derive and check the Model 0 FCFS traces independently. Future policies need their own service-order expectations. Capacity, legal service and unique ownership still apply. [Recorded development results](../PROJECT_PROGRESS.md#recorded-development-checks)
 
@@ -115,21 +115,7 @@ Record the configuration, independent calculation, expected and actual ordered t
 
 ### Fixed formal-entry selection
 
-Use [the node selection](../tests/model0_acceptance_nodes.txt) with the packaged A/B/C `MultiStationCoordinator.run()` entry. Existing smaller harnesses and native tests remain useful component/history checks. The selected tests retain the fixtures and expectations in §2; T03 and T08 use test-only C-only/A-only packages within the full station registry.
-
-| Scenario | Selected test location / check |
-|---|---|
-| T01 | `test_model0_entry_acceptance.py::test_t01_single_p1_abc_formal_entry_finishes_at_t8` |
-| T02 | `test_model0_entry_acceptance.py::test_t02_two_p1_same_time_arrivals_fcfs` (both registration orders) |
-| T03 | `test_model0_ab_coordinator.py::test_run_coordinated_t03_uses_two_c_servers_then_serves_waiter` |
-| T04 negative / positive | `test_model0_ab_coordinator.py::test_run_coordinated_t04_rejects_illegal_recommendation` / `test_run_coordinated_t04_allows_alternative_route_a_c_b` |
-| T05 | `test_model0_ab_coordinator.py::test_run_coordinated_t05_counts_travel_separately_from_waiting` |
-| T06 | `test_model0_entry_acceptance.py::test_t06_abc_same_time_completion_arrivals_and_waiter` |
-| T07 | `test_model0_ab_coordinator.py::test_run_coordinated_t07_p3_departs_after_c_release` |
-| T08 end-to-end | `test_model0_entry_acceptance.py::test_t08_abc_release_serves_the_existing_waiter` |
-| T08 component negative | `test_model0_entry_acceptance.py::test_t08_stale_release_preserves_the_current_owner` |
-| T09 | `test_model0_ab_coordinator.py::test_run_coordinated_t09_accepts_at_cutoff_and_drains` |
-| T10 | `test_model0_entry_acceptance.py::test_t10_abc_reproduces_raw_trace_across_fresh_runs` |
+Run the [fixed pytest node selection](../tests/model0_acceptance_nodes.txt) through the [formal Model 0 entry](MODEL_SPEC.md#1-architecture-and-separation-of-responsibilities). T03 and T08 use test-only C-only/A-only packages within the full station registry.
 
 This is **12 end-to-end checks plus one component negative**, covering ten scenario definitions. T02 expands to two checks, T04 has two subcases, and T10 compares two fresh runs within one check. T04's expected recommendation rejection does not require a drained successful simulation.
 
@@ -152,7 +138,7 @@ Retain the following with the student's run:
 - I1–I9 review: capacity/ownership, legal and unique completion, exact travel/service and waiting, FCFS ties, patient conservation, once-only visit events and causal/phase order. Trace checks and final-state assertions complement each other; neither alone proves every intermediate state.
 - Expected negative outcomes and any discrepancies, including the two known native failures; label component negatives separately from end-to-end runs. Record the student's review and Gate 1 decision explicitly.
 
-Run the full suite separately and retain its actual result. At code/test revision `10ac833`, assistant development checks were **13 passed** for the selection and **178 passed / 2 failed** for the full suite (exit 1, no skips/errors). These results do not close Gate 1. [Current development evidence](MODEL0_VERIFICATION_RECORD.md#latest-development-checkpoint--2026-11-24)
+Run the full suite separately and retain its actual result. [Development evidence and known Native failures](MODEL0_VERIFICATION_RECORD.md)
 
 ### Station guard regressions
 
@@ -163,12 +149,12 @@ Run the full suite separately and retain its actual result. At code/test revisio
 - Check raw order at simultaneous completions, arrivals, queue entries and service starts.
 - Confirm a single service-selection authority. SimPy Resource can grant a request immediately, so a station queue and a Resource queue can conflict.
 - Compare domain state and ownership across process resumes. Verify exactly one release per visit.
-- Record the SimPy version and the selected coordination approach. [Event contract](MODEL_SPEC.md#4-same-time-event-ordering-domain-semantics-and-open-implementation-decision)
+- Record the SimPy version and the selected coordination approach. [Event contract](MODEL_SPEC.md#4-same-time-event-ordering)
 - Verify admission at cutoff H and drain-to-completion. T09 covers both.
 
 ## 5. Verification and evaluation gates
 
-- **Gate 1** requires independent verification through the formal Model 0 entry point. It remains open. [Project progress](../PROJECT_PROGRESS.md)
+- **Gate 1** requires independent verification through the formal Model 0 entry point. [Current acceptance status](../PROJECT_PROGRESS.md#in-progress)
 - **Gate 2** requires a verified stochastic Model 1 FCFS baseline, checked primary inputs, calibrated or labelled assumptions, and repeated runs. [Model 1 inputs](MODEL_ASSUMPTIONS.md#4-model-1-candidate-examination-centre-configuration)
 
 See the specification for later RQ2 verification and evaluation design. [RQ2 plan](MODEL_SPEC.md#7-rq2-queue-scheduling-policy-evaluation-deferred)

@@ -1,4 +1,4 @@
-# Simulation Model Specification v1.1 — design, not implementation
+# Simulation Model Specification v1.1
 
 Model contract for the PSP305 daily health examination centre simulation. [Research scope](RESEARCH_CONTEXT.md) · [Rule evidence](MODEL_ASSUMPTIONS.md)
 
@@ -13,11 +13,9 @@ Model 0 uses the synthetic B0 compliance baseline. [Behaviour assumptions](MODEL
 
 ### Queue policy boundary (design only)
 
-A replaceable queue policy receives the station's committed waiting visits and explicitly permitted current observations, and selects the next waiting visit when service capacity is available. It does not choose a patient's next station, create a second waiting queue, change resource ownership or release resources. The Station Agent applies the selection and retains authority over the visit lifecycle. FCFS is the **only currently defined queue-policy baseline**; other existing policies, their information requirements and tie rules remain to be selected and reviewed. No complex priority queue or implementation mechanism is prescribed here.
+A replaceable queue policy selects an already-waiting visit using permitted observations when capacity is available. The Station Agent applies the selection and owns the queue, visit lifecycle and release. Routing independently chooses a next station. A custom waiting list and a native Resource queue could otherwise reorder the same requests.
 
-There must be **one effective scheduling authority**: SimPy's native Resource waiting/grant order and a custom station queue must not independently reorder the same requests. Their combination can otherwise introduce hidden FCFS selection, double ordering or grants that disagree with the selected policy. The selected Model 0 coordinated path chooses from the station's committed waiting list and requests only available native Resource capacity; the native Resource waiting queue must remain empty. Future policies must preserve one effective selection authority.
-
-Sections 2–5 retain the **Model 0 FCFS baseline contract**, including its dispatch order and same-time semantics. They do not require every future queue policy to be FCFS. Any later change to service selection needs its own documented expectations; changes to non-preemption, immediate dispatch or event coordination require separate review. The selected formal Model 0 entry is the packaged `MultiStationCoordinator.run()` with A/B/C, applying the six phases below. Native patient-process execution is retained as a historical comparison prototype, not the formal entry. This implementation choice does not prescribe a coordinator for every future model.
+The formal Model 0 entry is the packaged `MultiStationCoordinator.run()` with A/B/C. The coordinated Station Agent selects from its own waiting list and only requests available SimPy Resource capacity. The native Resource queue stays empty. Native patient-process execution remains a historical comparison prototype. [Acceptance procedure](VERIFICATION_PLAN.md#3-evidence-required-for-each-student-run-test) · [Native diagnostics](MODEL0_VERIFICATION_RECORD.md#open-native-path-failures)
 
 ## 2. Model 0 deterministic synthetic fixture
 
@@ -49,15 +47,15 @@ A successful visit has a unique `(patient_id, station_id, visit_id)`. Each requi
 
 - Arrivals at time `t` first pass admission; a patient is considered admitted only once.
 - Routing and B0 decision take **zero simulated time** and reserve no server capacity.
-- Travel ends at the Queue Entry timestamp. Even if service begins immediately, both Queue Entry and Service Start are logged; WAITING may have zero duration.
+- Travel ends at the Queue Entry timestamp. Log both Queue Entry and Service Start. Station wait is `service_start_time - queue_entry_time` and may be zero.
 - Station waiting queue **excludes active services**; an idle server can accept at its current timestamp once requests are committed.
 - Non-preemptive service occupies interval **[start,end)**, so one visit ending at `t` and another beginning at `t` do not overlap.
 - Completion, ownership clearing, release and patient progress update must form a coherent domain-level transaction, without intervening decisions observing inconsistent state. Station Agent is the **unique release authority**; guard duplicate completion, queue entry and release. A patient may request the next route after its prior visit is fully committed.
 - FINISHED follows final successful release; no outstanding request or resource ownership may remain.
 
-## 4. Same-time event ordering: domain semantics and open implementation decision
+## 4. Same-time event ordering
 
-**Proposed v1.1 domain-level order for any simulation timestamp t:**
+Domain actions are committed in this order at each simulation timestamp `t`.
 
 | Phase | Domain action |
 |---:|---|
@@ -70,9 +68,9 @@ A successful visit has a unique `(patient_id, station_id, visit_id)`. Each requi
 
 Causal prerequisites precede dependent actions. In Phase 3, first finish positive-duration travel due at t, then route newly admitted patients and complete their zero-time entry travel. Next record final departures and plan onward travel for continuing patients released in Phase 1. Use stable patient rank within each of these groups. Record events in commit order.
 
-In Phase 4, collect all patients ready to join a station at t across all travel sources. Commit station queues in **A,B,C** order and simultaneous entries at each station by patient rank. Patients already waiting keep their place. Phase 5 then dispatches available capacity from the head of each queue.
+In Phase 4, collect all patients ready to join a station at t across all travel sources. Commit station queues in **A,B,C** order and simultaneous entries at each station by patient rank. The coordinator uses patient ID as a fallback for equal ranks. Patients already waiting keep their place. Phase 5 then dispatches available capacity from the head of each queue.
 
-**Implementation.** SimPy orders events by time, priority and insertion order. Native Resource callbacks can produce a different order from the table. The formal coordinated entry commits domain actions in the stated phases and retains the original append order; it does not sort completed logs to match an expected trace. The native comparison prototype still has two known contract failures, retained in the full test suite. If the domain contract changes, document the change and rederive the expected traces before experiments. [Development status](../PROJECT_PROGRESS.md#recorded-development-checks)
+Log events in original commit order. SimPy schedules engine events by time, priority and insertion order. The coordinator enforces the domain phases above independently of the native callback order.
 
 Intake closes at synthetic cutoff H with **inclusive admission at t=H**; no patient first arriving after H is admitted. Existing admitted patients may finish after H. Do not use `env.run(until=H)` as the whole simulation termination rule. Run until the intake is closed/all attempts considered and all admitted patients have FINISHED, with no waiting or active services. Detect stalled patients; a bare empty event queue alone is not sufficient evidence of success.
 
@@ -82,26 +80,18 @@ Pre-run configuration checks:
 - unique existing station IDs, positive capacities, strictly positive service durations and nonnegative travel times;
 - each package contains valid station IDs; every fixed route is a no-duplicate permutation of its package;
 - all hard predecessor references are in scope, precedence graph is acyclic, and fixed route obeys its hard predecessors;
-- arrival times are finite and nonnegative and must be at or after the current simulation time at registration. A finite arrival beyond the intake cutoff remains a scheduled admission attempt. Patient ranks are stable and all times use the same unit.
+- arrival registration requires a unique patient ID. Arrival times are finite and nonnegative and must be at or after the current simulation time at registration. A finite arrival beyond the intake cutoff remains a scheduled admission attempt. Patient ranks are stable and all times use the same unit.
 
 The coordinated run checks every preregistered package against its managed stations before processing the first event bucket. It checks the declared route independently of the routing decision made during the run.
 
 Record domain event log at minimum: `sim_time`, `phase` (or other verified event ordering marker), `sequence_id`, `patient_id`, `station_id`, `visit_id`, `event_type`, `prior_state`, `new_state`, `recommended_station`, `chosen_station`, `resource_token_or_server_id` (if applicable), `run_id`. `run_id` and wall-clock metadata must be excluded when comparing normalized traces for determinism.
 
-At domain **commit boundaries**, check capacity, uniqueness of active visit/resource, eligibility, no duplicate completed exams, and patient conservation. A Patient Process waiting on a SimPy event is distinct from domain status WAITING/IN_SERVICE.
+Check [I1–I9](VERIFICATION_PLAN.md#1-shared-fixture-and-invariants) at domain commit boundaries.
 
 ## 6. Model 1 and Model 2 (deferred)
 
-Extend the verified baseline with stochastic inputs and common flow, B0 and FCFS for Model 1. Review provenance and screen offered load before selecting demand. [Candidate inputs and load check](MODEL_ASSUMPTIONS.md#4-model-1-candidate-examination-centre-configuration)
-
-Model 2 can examine what patients do before joining a queue. B1/B2 require separate evidence. Queue switching after entry is deferred. RQ2 can begin with a verified Model 1 baseline. [Behaviour assumptions](MODEL_ASSUMPTIONS.md#5-model-2-autonomous-patient-behaviour)
+Model 1 extends the verified baseline with stochastic inputs under common flow, B0 and FCFS. Model 2 can extend pre-queue patient decisions. [Model 1 candidate inputs](MODEL_ASSUMPTIONS.md#4-model-1-candidate-examination-centre-configuration) · [Behaviour and observation assumptions](MODEL_ASSUMPTIONS.md#5-model-2-autonomous-patient-behaviour)
 
 ## 7. RQ2 Queue Scheduling Policy evaluation (deferred)
 
-FCFS is the confirmed baseline. For each candidate policy, verify its decision object and source fidelity. Record permitted observations, the selection rule and the tie rule. A policy may use a permitted service-time estimate. Future realized service durations are unavailable to it.
-
-Hold routing and B0 common in the initial comparison. Pair exogenous arrivals, packages and service demands across policies, accounting for differences in event order, and plan repeated runs with uncertainty estimates. Policy selection, metric definitions and scenario settings are open. [Evaluation assumptions](MODEL_ASSUMPTIONS.md#6-evaluation-assumptions-rq2)
-
-## 8. Status
-
-The Model 0 design baseline is on `main`. Development checks and formal acceptance status are tracked in the progress record. Model 1 and Model 2 remain candidates. Research experiments and empirical validation are pending. [Project progress](../PROJECT_PROGRESS.md)
+A candidate queue policy must specify its decision timing, required observations, service selection, tie rule and resource interaction. Service-time estimates may be observable. Future realized service durations are unavailable. Review changes to non-preemption, immediate dispatch or event coordination separately. [Candidate rules](LITERATURE_LIBRARY.md#4-rq2-候选规则登记尚未选定的比较方案) · [Comparison design](MODEL_ASSUMPTIONS.md#6-evaluation-assumptions-rq2)
